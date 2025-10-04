@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script>
+      function doVibrate() {
+        navigator.vibrate([
+          100, 30, 100, 30, 100, 30, 200, 30, 200, 30, 200, 30, 100, 30, 100, 30, 100,
+        ]); // Vibrate 'SOS' in Morse.
+      }
+    </script>
+  </head>
+  <body>
+    <input type=button value="Do Vibration" onclick="doVibrate()">
+  </body>
+</html>

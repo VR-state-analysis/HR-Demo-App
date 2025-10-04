@@ -1,0 +1,116 @@
+<html>
+  <head>
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+  </head>
+  <body>
+    <a-scene vr-mode-ui="enabled: true">
+      <a-assets>
+        <a-mixin id="controller" 
+          tracked-controls
+          raycaster="objects: .clickable"
+          line="color: white; opacity: 0.75">
+        </a-mixin>
+      </a-assets>
+
+      <!-- Camera with cursor for non-VR clicking -->
+      <a-camera>
+        <a-cursor 
+          animation__click="property: scale; startEvents: click; easing: easeInCubic; dur: 150; from: 0.1 0.1 0.1; to: 1 1 1"
+          animation__fusing="property: scale; startEvents: fusing; easing: easeInCubic; dur: 1500; from: 1 1 1; to: 0.1 0.1 0.1"
+          geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
+          material="color: white; shader: flat">
+        </a-cursor>
+      </a-camera>
+
+      <!-- VR Controllers -->
+      <a-entity id="leftHand" 
+        mixin="controller"
+        hand-controls="hand: left; handModelStyle: lowPoly; color: #ffcccc">
+      </a-entity>
+      
+      <a-entity id="rightHand" 
+        mixin="controller" 
+        hand-controls="hand: right; handModelStyle: lowPoly; color: #ccffcc">
+      </a-entity>
+
+      <!-- Vibration Button -->
+      <a-box id="vibrateButton" 
+        class="clickable"
+        position="0 2 -2" 
+        width="0.5" 
+        height="0.3" 
+        depth="0.1" 
+        color="#FF6B6B"
+        cursor-listener
+        animation__mouseenter="property: scale; to: 1.1 1.1 1.1; startEvents: mouseenter; dur: 200"
+        animation__mouseleave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 200">
+      </a-box>
+      
+      <a-text value="VIBRATE" 
+        position="0 2 -1.95" 
+        align="center" 
+        color="white" 
+        scale="0.8 0.8 0.8">
+      </a-text>
+
+      <!-- Existing objects -->
+      <a-box position="-1 0.5 -3" rotation="0 45 0" color="#4CC3D9"></a-box>
+      <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
+      <a-cylinder position="1 0.75 -3" radius="0.5" height="1.5" color="#FFC65D"></a-cylinder>
+      <a-plane position="0 0 -4" rotation="-90 0 0" width="4" height="4" color="#7BC8A4"></a-plane>
+      <a-sky color="#ECECEC"></a-sky>
+
+      <script>
+        let vibrateInterval = null;
+
+        function vibrateControllers() {
+          // Vibrate left controller
+          const leftController = document.querySelector('#leftHand');
+          if (leftController && leftController.components['tracked-controls']) {
+            leftController.components['tracked-controls'].pulse(0.8, 300);
+          }
+          
+          // Vibrate right controller  
+          const rightController = document.querySelector('#rightHand');
+          if (rightController && rightController.components['tracked-controls']) {
+            rightController.components['tracked-controls'].pulse(0.8, 300);
+          }
+        }
+
+        // Listen for controller button presses
+        document.addEventListener('DOMContentLoaded', function() {
+          const leftHand = document.querySelector('#leftHand');
+          const rightHand = document.querySelector('#rightHand');
+
+          if (leftHand) {
+            leftHand.addEventListener('triggerdown', vibrateControllers);
+            leftHand.addEventListener('gripdown', vibrateControllers);
+            leftHand.addEventListener('abuttondown', vibrateControllers);
+            leftHand.addEventListener('bbuttondown', vibrateControllers);
+          }
+
+          if (rightHand) {
+            rightHand.addEventListener('triggerdown', vibrateControllers);
+            rightHand.addEventListener('gripdown', vibrateControllers);
+            rightHand.addEventListener('abuttondown', vibrateControllers);
+            rightHand.addEventListener('bbuttondown', vibrateControllers);
+          }
+        });
+
+        document.querySelector('#vibrateButton').addEventListener('click', function() {
+          if (vibrateInterval) {
+            // Stop vibrating
+            clearInterval(vibrateInterval);
+            vibrateInterval = null;
+            this.setAttribute('color', '#FF6B6B');
+          } else {
+            // Start vibrating every second
+            vibrateControllers();
+            vibrateInterval = setInterval(vibrateControllers, 1000);
+            this.setAttribute('color', '#00FF00');
+          }
+        });
+      </script>
+    </a-scene>
+  </body>
+</html>

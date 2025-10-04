@@ -1,0 +1,72 @@
+<html>
+  <head>
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    <script>
+      AFRAME.registerComponent('headset-pos-vel', {
+        schema: { target: { type: 'selector' } },
+        init: function () {
+          this.cameraEl = null;
+          this.currentPosition = new THREE.Vector3();
+          this.prevPosition = new THREE.Vector3();
+          this.velocity = new THREE.Vector3();
+          this.prevTime = null;
+          this.textEl = null;
+        },
+        update: function () {
+          this.textEl = this.data.target || this.el.querySelector('a-text');
+        },
+        updateCamera: function () {
+          if (this.cameraEl) { return; }
+          var sceneEl = this.el.sceneEl;
+          if (sceneEl && sceneEl.camera && sceneEl.camera.el) {
+            this.cameraEl = sceneEl.camera.el;
+            this.cameraEl.object3D.getWorldPosition(this.prevPosition);
+          }
+        },
+        tick: function (time, delta) {
+          this.updateCamera();
+          if (!this.cameraEl || !this.textEl) { return; }
+          var camObj = this.cameraEl.object3D;
+          camObj.getWorldPosition(this.currentPosition);
+
+          if (this.prevTime !== null && delta > 0) {
+            var dt = delta / 1000;
+            if (dt > 0) {
+              this.velocity.copy(this.currentPosition).sub(this.prevPosition).divideScalar(dt);
+            } else {
+              this.velocity.set(0, 0, 0);
+            }
+          } else {
+            this.velocity.set(0, 0, 0);
+          }
+
+          this.prevPosition.copy(this.currentPosition);
+          this.prevTime = time;
+
+          var pos = this.currentPosition;
+          var vel = this.velocity;
+          var message =
+            'Pos (m): ' + pos.x.toFixed(2) + ', ' + pos.y.toFixed(2) + ', ' + pos.z.toFixed(2) + '\n' +
+            'Vel (m/s): ' + vel.x.toFixed(2) + ', ' + vel.y.toFixed(2) + ', ' + vel.z.toFixed(2);
+
+          this.textEl.setAttribute('value', message);
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <a-scene vr-mode-ui="enabled: true">
+      <a-box position="-1 0.5 -3" rotation="0 45 0" color="#4CC3D9"></a-box>
+      <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
+      <a-cylinder position="1 0.75 -3" radius="0.5" height="1.5" color="#FFC65D"></a-cylinder>
+      <a-plane position="0 0 -4" rotation="-90 0 0" width="4" height="4" color="#7BC8A4"></a-plane>
+      <a-sky color="#ECECEC"></a-sky>
+      <a-entity id="showPosVel" position="0 1.2 -2" headset-pos-vel="target: #showPosVelText">
+        <a-plane width="1" height="0.3" material="color: #FFFCAB; shader: flat"></a-plane>
+        <a-text id="showPosVelText" value="Loading..." align="center" color="#333" width="2" position="0 0 0.02"></a-text>
+      </a-entity>
+      <a-entity id="leftHand" laser-controls="hand: left" curosr="rayOrigin: entity" raycaster="object: .clickable; far: 10"></a-entity>
+      <a-entity id="rightHand" laser-controls="hand: right" curosr="rayOrigin: entity" raycaster="object: .clickable; far: 10"></a-entity>
+    </a-scene>
+  </body>
+</html>
