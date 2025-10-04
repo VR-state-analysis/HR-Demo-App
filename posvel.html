@@ -6,11 +6,11 @@
         schema: { target: { type: 'selector' } },
         init: function () {
           this.cameraEl = null;
-          this.currentPosition = new THREE.Vector3();
-          this.prevPosition = new THREE.Vector3();
-          this.velocity = new THREE.Vector3();
-          this.prevTime = null;
           this.textEl = null;
+          this.prevTime = null;
+          this.trackers = {};
+          this.cache = { leftHand: null, rightHand: null };
+          this.currentText = '';
         },
         update: function () {
           this.textEl = this.data.target || this.el.querySelector('a-text');
@@ -20,36 +20,80 @@
           var sceneEl = this.el.sceneEl;
           if (sceneEl && sceneEl.camera && sceneEl.camera.el) {
             this.cameraEl = sceneEl.camera.el;
-            this.cameraEl.object3D.getWorldPosition(this.prevPosition);
           }
+        },
+        getTracker: function (key) {
+          if (!this.trackers[key]) {
+            this.trackers[key] = {
+              prevPosition: new THREE.Vector3(),
+              currentPosition: new THREE.Vector3(),
+              velocity: new THREE.Vector3(),
+              hasPrev: false
+            };
+          }
+          return this.trackers[key];
+        },
+        formatVector: function (vec) {
+          return vec.x.toFixed(2) + ', ' + vec.y.toFixed(2) + ', ' + vec.z.toFixed(2);
+        },
+        resolveController: function (id) {
+          var sceneEl = this.el.sceneEl;
+          if (!sceneEl) { return null; }
+          var cached = this.cache[id];
+          if (cached && cached.isConnected) { return cached; }
+          var el = sceneEl.querySelector('#' + id);
+          if (el) { this.cache[id] = el; }
+          return el;
         },
         tick: function (time, delta) {
           this.updateCamera();
-          if (!this.cameraEl || !this.textEl) { return; }
-          var camObj = this.cameraEl.object3D;
-          camObj.getWorldPosition(this.currentPosition);
+          if (!this.textEl) { return; }
+          var sceneEl = this.el.sceneEl;
+          if (!sceneEl) { return; }
 
-          if (this.prevTime !== null && delta > 0) {
-            var dt = delta / 1000;
-            if (dt > 0) {
-              this.velocity.copy(this.currentPosition).sub(this.prevPosition).divideScalar(dt);
-            } else {
-              this.velocity.set(0, 0, 0);
+          var dt = (this.prevTime !== null && delta > 0) ? delta / 1000 : null;
+          var lines = [];
+
+          var leftHandEl = this.resolveController('leftHand');
+          var rightHandEl = this.resolveController('rightHand');
+
+          var targets = [
+            { label: 'Headset', obj3D: this.cameraEl ? this.cameraEl.object3D : null, key: 'headset' },
+            { label: 'Left Ctrl', obj3D: leftHandEl ? leftHandEl.object3D : null, key: 'leftController' },
+            { label: 'Right Ctrl', obj3D: rightHandEl ? rightHandEl.object3D : null, key: 'rightController' }
+          ];
+
+          for (var i = 0; i < targets.length; i++) {
+            var target = targets[i];
+            if (!target.obj3D) {
+              lines.push(target.label + ': N/A');
+              continue;
             }
-          } else {
-            this.velocity.set(0, 0, 0);
+
+            var tracker = this.getTracker(target.key);
+            target.obj3D.getWorldPosition(tracker.currentPosition);
+
+            if (dt && tracker.hasPrev) {
+              tracker.velocity.copy(tracker.currentPosition).sub(tracker.prevPosition).divideScalar(dt);
+            } else {
+              tracker.velocity.set(0, 0, 0);
+            }
+
+            tracker.prevPosition.copy(tracker.currentPosition);
+            tracker.hasPrev = true;
+
+            lines.push(
+              target.label + ' Pos (m): ' + this.formatVector(tracker.currentPosition) + '\n' +
+              target.label + ' Vel (m/s): ' + this.formatVector(tracker.velocity)
+            );
           }
 
-          this.prevPosition.copy(this.currentPosition);
           this.prevTime = time;
-
-          var pos = this.currentPosition;
-          var vel = this.velocity;
-          var message =
-            'Pos (m): ' + pos.x.toFixed(2) + ', ' + pos.y.toFixed(2) + ', ' + pos.z.toFixed(2) + '\n' +
-            'Vel (m/s): ' + vel.x.toFixed(2) + ', ' + vel.y.toFixed(2) + ', ' + vel.z.toFixed(2);
-
-          this.textEl.setAttribute('value', message);
+          var message = lines.join('\n');
+          if (message !== this.currentText) {
+            this.currentText = message;
+            this.textEl.setAttribute('value', message);
+          }
         }
       });
     </script>
