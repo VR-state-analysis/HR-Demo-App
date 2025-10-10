@@ -11,13 +11,29 @@
           this.trackers = {};
           this.cache = { leftHand: null, rightHand: null };
           this.currentText = '';
+          this.db = null;
+          this.recordCount = 0;
+          this.uploadInterval = null;
+          this.uploadInProgress = false;
+          this.uploadSession = { key: null, name: null };
+          this.boundUnloadHandler = null;
+          this.initDB()
+            .then((db) => {
+              this.db = db;
+              this.refreshRecordCount();
+              this.startUploadLoop();
+            })
+            .catch((error) => {
+              console.error('IndexedDB initialization failed', error);
+              this.db = null;
+            });
         },
         update: function () {
           this.textEl = this.data.target || this.el.querySelector('a-text');
         },
         updateCamera: function () {
           if (this.cameraEl) { return; }
-          var sceneEl = this.el.sceneEl;
+          const sceneEl = this.el.sceneEl;
           if (sceneEl && sceneEl.camera && sceneEl.camera.el) {
             this.cameraEl = sceneEl.camera.el;
           }
@@ -28,49 +44,154 @@
               prevPosition: new THREE.Vector3(),
               currentPosition: new THREE.Vector3(),
               velocity: new THREE.Vector3(),
-              hasPrev: false
+              lastSavedPosition: new THREE.Vector3(),
+              hasPrev: false,
+              hasSaved: false
             };
           }
           return this.trackers[key];
+        },
+        initDB: function () {
+          if (!('indexedDB' in window)) {
+            console.warn('IndexedDB is not supported in this browser. Position persistence disabled.');
+            return Promise.resolve(null);
+          }
+
+          return new Promise((resolve, reject) => {
+            const request = window.indexedDB.open('posvel-tracker-db', 1);
+
+            request.onupgradeneeded = (event) => {
+              const db = event.target.result;
+              if (!db.objectStoreNames.contains('trackerPositions')) {
+                const store = db.createObjectStore('trackerPositions', { keyPath: 'id', autoIncrement: true });
+                store.createIndex('trackerKey', 'trackerKey', { unique: false });
+                store.createIndex('timestamp', 'timestamp', { unique: false });
+              }
+            };
+
+            request.onsuccess = (event) => {
+              const db = event.target.result;
+              this.db = db;
+              resolve(db);
+            };
+
+            request.onerror = (event) => {
+              console.error('Failed to open IndexedDB for tracker positions', event.target.error);
+              reject(event.target.error);
+            };
+          });
         },
         formatVector: function (vec) {
           return vec.x.toFixed(2) + ', ' + vec.y.toFixed(2) + ', ' + vec.z.toFixed(2);
         },
         resolveController: function (id) {
-          var sceneEl = this.el.sceneEl;
+          const sceneEl = this.el.sceneEl;
           if (!sceneEl) { return null; }
-          var cached = this.cache[id];
+          const cached = this.cache[id];
           if (cached && cached.isConnected) { return cached; }
-          var el = sceneEl.querySelector('#' + id);
+          const el = sceneEl.querySelector('#' + id);
           if (el) { this.cache[id] = el; }
           return el;
+        },
+        ensureUploadSession: function () {
+          if (this.uploadSession && this.uploadSession.key) { return Promise.resolve(this.uploadSession); }
+
+          return fetch('https://suzaku.tailcbbed9.ts.net:8000/api/new-upload-key', { method: 'POST' })
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error('Failed to obtain upload key: ' + response.status);
+              }
+              return response.json();
+            })
+            .then((data) => {
+              if (!data || typeof data.upload_key !== 'string' || data.upload_key.length === 0) {
+                throw new Error('Malformed upload key response');
+              }
+              this.uploadSession = { key: data.upload_key, name: data.name || '' };
+              return this.uploadSession;
+            })
+            .catch((error) => {
+              console.error('Unable to initialize upload session', error);
+              throw error;
+            });
+        },
+        startUploadLoop: function () {
+          if (this.uploadInterval || !this.db) { return; }
+
+          const beginLoop = () => {
+            if (this.uploadInterval) { return; }
+            this.uploadInterval = setInterval(() => {
+              this.uploadPendingRecords();
+            }, 1000);
+            if (!this.boundUnloadHandler) {
+              this.boundUnloadHandler = () => {
+                this.clearUploadLoop();
+              };
+              window.addEventListener('beforeunload', this.boundUnloadHandler);
+            }
+            this.uploadPendingRecords();
+          };
+
+          this.ensureUploadSession()
+            .catch(() => {
+              console.warn('Delaying uploads until upload session is ready');
+            })
+            .finally(() => {
+              beginLoop();
+            });
+        },
+        clearUploadLoop: function () {
+          if (this.uploadInterval) {
+            clearInterval(this.uploadInterval);
+            this.uploadInterval = null;
+          }
+          if (this.boundUnloadHandler) {
+            window.removeEventListener('beforeunload', this.boundUnloadHandler);
+            this.boundUnloadHandler = null;
+          }
+        },
+        refreshRecordCount: function () {
+          const db = this.db;
+          if (!db) { return; }
+
+          const tx = db.transaction('trackerPositions', 'readonly');
+          const store = tx.objectStore('trackerPositions');
+          const countRequest = store.count();
+
+          countRequest.onsuccess = () => {
+            this.recordCount = countRequest.result;
+          };
+
+          countRequest.onerror = (event) => {
+            console.error('Failed to count tracker positions', event.target.error);
+          };
         },
         tick: function (time, delta) {
           this.updateCamera();
           if (!this.textEl) { return; }
-          var sceneEl = this.el.sceneEl;
+          const sceneEl = this.el.sceneEl;
           if (!sceneEl) { return; }
 
-          var dt = (this.prevTime !== null && delta > 0) ? delta / 1000 : null;
-          var lines = [];
+          const dt = (this.prevTime !== null && delta > 0) ? delta / 1000 : null;
+          const lines = [];
 
-          var leftHandEl = this.resolveController('leftHand');
-          var rightHandEl = this.resolveController('rightHand');
+          const leftHandEl = this.resolveController('leftHand');
+          const rightHandEl = this.resolveController('rightHand');
 
-          var targets = [
+          const targets = [
             { label: 'Headset', obj3D: this.cameraEl ? this.cameraEl.object3D : null, key: 'headset' },
             { label: 'Left Ctrl', obj3D: leftHandEl ? leftHandEl.object3D : null, key: 'leftController' },
             { label: 'Right Ctrl', obj3D: rightHandEl ? rightHandEl.object3D : null, key: 'rightController' }
           ];
 
-          for (var i = 0; i < targets.length; i++) {
-            var target = targets[i];
+          for (let i = 0; i < targets.length; i++) {
+            const target = targets[i];
             if (!target.obj3D) {
               lines.push(target.label + ': N/A');
               continue;
             }
 
-            var tracker = this.getTracker(target.key);
+            const tracker = this.getTracker(target.key);
             target.obj3D.getWorldPosition(tracker.currentPosition);
 
             if (dt && tracker.hasPrev) {
@@ -82,18 +203,184 @@
             tracker.prevPosition.copy(tracker.currentPosition);
             tracker.hasPrev = true;
 
+            this.persistPosition(target.key, tracker);
+
             lines.push(
               target.label + ' Pos (m): ' + this.formatVector(tracker.currentPosition) + '\n' +
               target.label + ' Vel (m/s): ' + this.formatVector(tracker.velocity)
             );
           }
 
+          if (this.uploadSession && this.uploadSession.name) {
+            lines.push('Upload name: ' + this.uploadSession.name);
+          }
+
+          lines.push('Stored samples: ' + this.recordCount);
+
           this.prevTime = time;
-          var message = lines.join('\n');
+          const message = lines.join('\n');
           if (message !== this.currentText) {
             this.currentText = message;
             this.textEl.setAttribute('value', message);
           }
+        },
+        persistPosition: function (key, tracker) {
+          const db = this.db;
+          if (!db) { return; }
+
+          const lastSaved = tracker.lastSavedPosition;
+          const current = tracker.currentPosition;
+
+          if (tracker.hasSaved && lastSaved.distanceToSquared(current) < 1e-6) {
+            return;
+          }
+
+          lastSaved.copy(current);
+          tracker.hasSaved = true;
+
+          const tx = db.transaction('trackerPositions', 'readwrite');
+          const store = tx.objectStore('trackerPositions');
+          const addRequest = store.add({
+            trackerKey: key,
+            timestamp: Date.now(),
+            position: { x: current.x, y: current.y, z: current.z },
+            uploaded: false
+          });
+
+          addRequest.onsuccess = () => {
+            this.recordCount += 1;
+          };
+
+          addRequest.onerror = (event) => {
+            console.error('Failed to add tracker position', event.target.error);
+          };
+
+          tx.onerror = (event) => {
+            console.error('Failed to store tracker position', event.target.error);
+          };
+        },
+        uploadPendingRecords: function () {
+          if (!this.db || this.uploadInProgress) { return; }
+
+          this.uploadInProgress = true;
+          const db = this.db;
+          const records = [];
+          const tx = db.transaction('trackerPositions', 'readonly');
+          const store = tx.objectStore('trackerPositions');
+          const cursorRequest = store.openCursor();
+
+          cursorRequest.onsuccess = (event) => {
+            const cursor = event.target.result;
+            if (cursor) {
+              const value = cursor.value;
+              if (!value.uploaded) {
+                records.push({ key: cursor.primaryKey, value: value });
+              }
+              cursor.continue();
+            }
+          };
+
+          cursorRequest.onerror = (event) => {
+            console.error('Failed to read tracker positions for upload', event.target.error);
+            this.uploadInProgress = false;
+          };
+
+          tx.oncomplete = () => {
+            if (records.length === 0) {
+              this.uploadInProgress = false;
+              return;
+            }
+            this.ensureUploadSession()
+              .then((session) => {
+                this.postRecords(records, session);
+              })
+              .catch(() => {
+                console.warn('Upload session unavailable, will retry');
+                this.uploadInProgress = false;
+              });
+          };
+
+          tx.onerror = (event) => {
+            console.error('Transaction failed while preparing upload', event.target.error);
+            this.uploadInProgress = false;
+          };
+        },
+        postRecords: function (entries, session) {
+          const payloadLines = entries.map((entry) => {
+            return JSON.stringify({
+              trackerKey: entry.value.trackerKey,
+              timestamp: entry.value.timestamp,
+              position: entry.value.position
+            });
+          });
+
+          if (payloadLines.length === 0) {
+            this.uploadInProgress = false;
+            return;
+          }
+
+          const body = payloadLines.join('\n');
+          const uploadKey = session && session.key ? session.key : '';
+          if (!uploadKey) {
+            console.error('No upload key available for upload');
+            this.uploadInProgress = false;
+            return;
+          }
+
+          const url = 'https://suzaku.tailcbbed9.ts.net:8000/api/upload?upload_key=' + encodeURIComponent(uploadKey);
+
+          fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-ndjson'
+            },
+            body: body
+          })
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error('Unexpected response status ' + response.status);
+              }
+              return response.text().catch(() => '');
+            })
+            .then(() => {
+              this.markRecordsUploaded(entries);
+            })
+            .catch((error) => {
+              console.error('Failed to upload tracker positions', error);
+              this.uploadInProgress = false;
+            });
+        },
+        markRecordsUploaded: function (entries) {
+          const db = this.db;
+          if (!db) {
+            this.uploadInProgress = false;
+            return;
+          }
+
+          const tx = db.transaction('trackerPositions', 'readwrite');
+          const store = tx.objectStore('trackerPositions');
+
+          for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            const updated = Object.assign({}, entry.value, { uploaded: true });
+            if (!('id' in updated)) {
+              updated.id = entry.key;
+            }
+            store.put(updated);
+          }
+
+          tx.oncomplete = () => {
+            this.uploadInProgress = false;
+            this.refreshRecordCount();
+          };
+
+          tx.onerror = (event) => {
+            console.error('Failed to mark tracker positions as uploaded', event.target.error);
+            this.uploadInProgress = false;
+          };
+        },
+        remove: function () {
+          this.clearUploadLoop();
         }
       });
     </script>
