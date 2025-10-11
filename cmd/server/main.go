@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/VR-state-analysis/HR-Demo-App/server"
 )
 
 func main() {
@@ -27,20 +29,20 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/new-upload-key", newUploadKeyHandler)
-	mux.HandleFunc("/api/upload", uploadHandler)
+	mux.HandleFunc("POST /api/new-upload-key", server.NewUploadKeyHandler)
+	mux.HandleFunc("POST /api/upload", server.UploadHandler)
 
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("/", fileServer)
 
-	server := &http.Server{
+	hs := &http.Server{
 		Addr:    addr,
 		Handler: mux,
 	}
 
 	scheme := "http"
 	if *useTLS {
-		server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		hs.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 		scheme = "https"
 	}
 
@@ -52,13 +54,13 @@ func main() {
 	log.Printf("Serving %s on %s:%d", scheme, displayHost, *port)
 
 	if *useTLS {
-		if err := server.ListenAndServeTLS(*certPath, *keyPath); err != nil {
-			log.Fatalf("server error: %v", err)
+		if err := hs.ListenAndServeTLS(*certPath, *keyPath); err != nil {
+			log.Fatalf("http server error: %v", err)
 		}
 		return
 	}
 
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatalf("server error: %v", err)
+	if err := hs.ListenAndServe(); err != nil {
+		log.Fatalf("http server error: %v", err)
 	}
 }

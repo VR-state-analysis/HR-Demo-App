@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bufio"
@@ -11,10 +11,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+var uploadKeys = []string{}
+var uploadKeysMutex sync.Mutex
 
 type DataEntry struct {
 	TrackerKey string `json:"trackerKey"`
@@ -116,53 +121,14 @@ func uploadNameFromKey(uploadKey string) string {
 	return strings.Join(words, " ")
 }
 
-func sanitizeFilenameComponent(name string) string {
-	cleaned := strings.ToLower(strings.TrimSpace(name))
-	if cleaned == "" {
-		return "upload"
-	}
-
-	var builder strings.Builder
-	builder.Grow(len(cleaned))
-
-	lastUnderscore := false
-	for _, r := range cleaned {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			builder.WriteRune(r)
-			lastUnderscore = false
-			continue
-		}
-
-		if !lastUnderscore {
-			builder.WriteRune('_')
-			lastUnderscore = true
-		}
-	}
-
-	result := strings.Trim(builder.String(), "_")
-	if result == "" {
-		return "upload"
-	}
-
-	return result
-}
-
-func saveUpload(uploadKey, uploadName, userAgent string, receivedAt time.Time, lines []string) (filePath string, err error) {
-	if uploadName == "" {
-		uploadName = uploadNameFromKey(uploadKey)
-	}
+func saveUpload(uploadKey, userAgent string, receivedAt time.Time, lines []string) (filePath string, err error) {
+	uploadName := uploadNameFromKey(uploadKey)
 
 	if err = os.MkdirAll(uploadDir, 0o755); err != nil {
 		return "", fmt.Errorf("create upload directory: %w", err)
 	}
 
-	sanitizedName := sanitizeFilenameComponent(uploadName)
-	keyPrefix := uploadKey
-	if len(keyPrefix) > uploadKeyPrefixLength {
-		keyPrefix = keyPrefix[:uploadKeyPrefixLength]
-	}
-
-	filename := fmt.Sprintf("%s_%s.csv", sanitizedName, keyPrefix)
+	filename := fmt.Sprintf("%s_%s.csv", uploadName, uploadKey)
 	filePath = filepath.Join(uploadDir, filename)
 
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR, 0o644)
@@ -276,10 +242,9 @@ func saveUpload(uploadKey, uploadName, userAgent string, receivedAt time.Time, l
 	return filePath, nil
 }
 
-func newUploadKeyHandler(w http.ResponseWriter, r *http.Request) {
+func NewUploadKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+		panic("only POST allowed")
 	}
 
 	uploadKey, err := generateUploadKey()
@@ -288,6 +253,12 @@ func newUploadKeyHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to generate upload key", http.StatusInternalServerError)
 		return
 	}
+
+	func() {
+		uploadKeysMutex.Lock()
+		defer uploadKeysMutex.Unlock()
+		uploadKeys = append(uploadKeys, uploadKey)
+	}()
 
 	uploadName := uploadNameFromKey(uploadKey)
 	log.Printf("generated upload key upload_name=%q upload_key=%q", uploadName, uploadKey)
@@ -304,10 +275,9 @@ func newUploadKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func uploadHandler(w http.ResponseWriter, r *http.Request) {
+func UploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+		panic("only POST allowed")
 	}
 
 	uploadKey := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("upload_key")))
@@ -317,12 +287,22 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(uploadKey) != uploadKeyHexLength {
-		http.Error(w, "invalid upload_key length: expected 128-character hex string", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("invalid upload_key length: expected %d-character hex string", uploadKeyHexLength), http.StatusBadRequest)
 		return
 	}
 
 	if _, err := hex.DecodeString(uploadKey); err != nil {
 		http.Error(w, "invalid upload_key format: must be hexadecimal", http.StatusBadRequest)
+		return
+	}
+
+	validUploadKey := func() bool {
+		uploadKeysMutex.Lock()
+		defer uploadKeysMutex.Unlock()
+		return slices.Contains(uploadKeys, uploadKey)
+	}()
+	if !validUploadKey {
+		http.Error(w, "invalid upload_key value: generate another one and try again", http.StatusBadRequest)
 		return
 	}
 
@@ -338,7 +318,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	scanner.Buffer(buf, 16*1024*1024)
 
 	records := 0
-	lines := make([]string, 0, 64)
+	lines := make([]string, 0, 200) // approx. 10 per second, and save every 10 seconds (and add some buffer for uncertainty)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -363,7 +343,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, err := saveUpload(uploadKey, uploadName, userAgent, receivedAt, lines)
+	filePath, err := saveUpload(uploadKey, userAgent, receivedAt, lines)
 	if err != nil {
 		log.Printf("failed to store upload: %v", err)
 		http.Error(w, "failed to store upload", http.StatusInternalServerError)
@@ -386,7 +366,6 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		"records":     records,
 		"received_at": receivedAt.Format(time.RFC3339Nano),
 		"file_path":   filePath,
-		"upload_key":  uploadKey,
 		"upload_name": uploadName,
 	}
 

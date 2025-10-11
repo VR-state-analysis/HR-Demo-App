@@ -122,7 +122,7 @@
             if (this.uploadInterval) { return; }
             this.uploadInterval = setInterval(() => {
               this.uploadPendingRecords();
-            }, 1000);
+            }, 10000);
             if (!this.boundUnloadHandler) {
               this.boundUnloadHandler = () => {
                 this.clearUploadLoop();
