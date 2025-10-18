@@ -203,8 +203,8 @@
         <a-plane width="1" height="0.3" material="color: #FFFCAB; shader: flat"></a-plane>
         <a-text id="showPosVelText" value="Loading..." align="center" color="#333" width="2" position="0 0 0.02"></a-text>
       </a-entity>
-      <a-entity id="leftHand" laser-controls="hand: left" curosr="rayOrigin: entity" raycaster="object: .clickable; far: 10"></a-entity>
-      <a-entity id="rightHand" laser-controls="hand: right" curosr="rayOrigin: entity" raycaster="object: .clickable; far: 10"></a-entity>
+      <a-entity id="leftHand" laser-controls="hand: left" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
+      <a-entity id="rightHand" laser-controls="hand: right" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
     </a-scene>
   </body>
 </html>
