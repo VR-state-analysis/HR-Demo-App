@@ -15,7 +15,8 @@
           this.recordCount = 0;
           this.uploadSession = { key: null, name: null };
           this.boundUnloadHandler = null;
-          this.uploadInterval = setInterval(this.uploadPendingRecords, 3000);
+          const thisThis = this;
+          this.uploadInterval = setInterval(thisThis.uploadPendingRecords, 3000);
         },
         update: function () {
           this.textEl = this.data.target || this.el.querySelector('a-text');
