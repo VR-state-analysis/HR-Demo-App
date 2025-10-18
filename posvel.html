@@ -55,7 +55,7 @@
         ensureUploadSession: function () {
           if (this.uploadSession && this.uploadSession.key) { return Promise.resolve(this.uploadSession); }
 
-          return fetch('https://suzaku.tailcbbed9.ts.net:8000/api/new-upload-key', { method: 'POST' })
+          return fetch('/api/new-upload-key', { method: 'POST' })
             .then((response) => {
               if (!response.ok) {
                 throw new Error('Failed to obtain upload key: ' + response.status);
@@ -168,7 +168,7 @@
             return;
           }
 
-          const url = 'https://hr-demo-app-server.vrsa.2kendon.ca/api/upload?upload_key=' + encodeURIComponent(uploadKey);
+          const url = '/api/upload?upload_key=' + encodeURIComponent(uploadKey);
 
           fetch(url, {
             method: 'POST',
