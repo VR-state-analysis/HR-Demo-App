@@ -11,22 +11,11 @@
           this.trackers = {};
           this.cache = { leftHand: null, rightHand: null };
           this.currentText = '';
-          this.db = null;
+          this.records = [];
           this.recordCount = 0;
           this.uploadInterval = null;
-          this.uploadInProgress = false;
           this.uploadSession = { key: null, name: null };
           this.boundUnloadHandler = null;
-          this.initDB()
-            .then((db) => {
-              this.db = db;
-              this.refreshRecordCount();
-              this.startUploadLoop();
-            })
-            .catch((error) => {
-              console.error('IndexedDB initialization failed', error);
-              this.db = null;
-            });
         },
         update: function () {
           this.textEl = this.data.target || this.el.querySelector('a-text');
@@ -50,36 +39,6 @@
             };
           }
           return this.trackers[key];
-        },
-        initDB: function () {
-          if (!('indexedDB' in window)) {
-            console.warn('IndexedDB is not supported in this browser. Position persistence disabled.');
-            return Promise.resolve(null);
-          }
-
-          return new Promise((resolve, reject) => {
-            const request = window.indexedDB.open('posvel-tracker-db', 1);
-
-            request.onupgradeneeded = (event) => {
-              const db = event.target.result;
-              if (!db.objectStoreNames.contains('trackerPositions')) {
-                const store = db.createObjectStore('trackerPositions', { keyPath: 'id', autoIncrement: true });
-                store.createIndex('trackerKey', 'trackerKey', { unique: false });
-                store.createIndex('timestamp', 'timestamp', { unique: false });
-              }
-            };
-
-            request.onsuccess = (event) => {
-              const db = event.target.result;
-              this.db = db;
-              resolve(db);
-            };
-
-            request.onerror = (event) => {
-              console.error('Failed to open IndexedDB for tracker positions', event.target.error);
-              reject(event.target.error);
-            };
-          });
         },
         formatVector: function (vec) {
           return vec.x.toFixed(2) + ', ' + vec.y.toFixed(2) + ', ' + vec.z.toFixed(2);
@@ -115,31 +74,6 @@
               throw error;
             });
         },
-        startUploadLoop: function () {
-          if (this.uploadInterval || !this.db) { return; }
-
-          const beginLoop = () => {
-            if (this.uploadInterval) { return; }
-            this.uploadInterval = setInterval(() => {
-              this.uploadPendingRecords();
-            }, 10000);
-            if (!this.boundUnloadHandler) {
-              this.boundUnloadHandler = () => {
-                this.clearUploadLoop();
-              };
-              window.addEventListener('beforeunload', this.boundUnloadHandler);
-            }
-            this.uploadPendingRecords();
-          };
-
-          this.ensureUploadSession()
-            .catch(() => {
-              console.warn('Delaying uploads until upload session is ready');
-            })
-            .finally(() => {
-              beginLoop();
-            });
-        },
         clearUploadLoop: function () {
           if (this.uploadInterval) {
             clearInterval(this.uploadInterval);
@@ -149,22 +83,6 @@
             window.removeEventListener('beforeunload', this.boundUnloadHandler);
             this.boundUnloadHandler = null;
           }
-        },
-        refreshRecordCount: function () {
-          const db = this.db;
-          if (!db) { return; }
-
-          const tx = db.transaction('trackerPositions', 'readonly');
-          const store = tx.objectStore('trackerPositions');
-          const countRequest = store.count();
-
-          countRequest.onsuccess = () => {
-            this.recordCount = countRequest.result;
-          };
-
-          countRequest.onerror = (event) => {
-            console.error('Failed to count tracker positions', event.target.error);
-          };
         },
         tick: function (time, delta) {
           this.updateCamera();
@@ -204,6 +122,7 @@
             tracker.hasPrev = true;
 
             this.persistPosition(target.key, tracker);
+            this.records.push({trackerKey: target.key, timestamp: time, tracker.currentPosition});
 
             lines.push(
               target.label + ' Pos (m): ' + this.formatVector(tracker.currentPosition) + '\n' +
@@ -224,86 +143,10 @@
             this.textEl.setAttribute('value', message);
           }
         },
-        persistPosition: function (key, tracker) {
-          const db = this.db;
-          if (!db) { return; }
-
-          const lastSaved = tracker.lastSavedPosition;
-          const current = tracker.currentPosition;
-
-          if (tracker.hasSaved && lastSaved.distanceToSquared(current) < 1e-6) {
-            return;
-          }
-
-          lastSaved.copy(current);
-          tracker.hasSaved = true;
-
-          const tx = db.transaction('trackerPositions', 'readwrite');
-          const store = tx.objectStore('trackerPositions');
-          const addRequest = store.add({
-            trackerKey: key,
-            timestamp: Date.now(),
-            position: { x: current.x, y: current.y, z: current.z },
-            uploaded: false
-          });
-
-          addRequest.onsuccess = () => {
-            this.recordCount += 1;
-          };
-
-          addRequest.onerror = (event) => {
-            console.error('Failed to add tracker position', event.target.error);
-          };
-
-          tx.onerror = (event) => {
-            console.error('Failed to store tracker position', event.target.error);
-          };
-        },
         uploadPendingRecords: function () {
-          if (!this.db || this.uploadInProgress) { return; }
-
-          this.uploadInProgress = true;
-          const db = this.db;
-          const records = [];
-          const tx = db.transaction('trackerPositions', 'readonly');
-          const store = tx.objectStore('trackerPositions');
-          const cursorRequest = store.openCursor();
-
-          cursorRequest.onsuccess = (event) => {
-            const cursor = event.target.result;
-            if (cursor) {
-              const value = cursor.value;
-              if (!value.uploaded) {
-                records.push({ key: cursor.primaryKey, value: value });
-              }
-              cursor.continue();
-            }
-          };
-
-          cursorRequest.onerror = (event) => {
-            console.error('Failed to read tracker positions for upload', event.target.error);
-            this.uploadInProgress = false;
-          };
-
-          tx.oncomplete = () => {
-            if (records.length === 0) {
-              this.uploadInProgress = false;
-              return;
-            }
-            this.ensureUploadSession()
-              .then((session) => {
-                this.postRecords(records, session);
-              })
-              .catch(() => {
-                console.warn('Upload session unavailable, will retry');
-                this.uploadInProgress = false;
-              });
-          };
-
-          tx.onerror = (event) => {
-            console.error('Transaction failed while preparing upload', event.target.error);
-            this.uploadInProgress = false;
-          };
+          const ourRecords = this.records;
+          this.records = [];
+          this.ensureUploadSession().then((session) => this.postRecords(ourRecords, session);
         },
         postRecords: function (entries, session) {
           const payloadLines = entries.map((entry) => {
@@ -315,7 +158,6 @@
           });
 
           if (payloadLines.length === 0) {
-            this.uploadInProgress = false;
             return;
           }
 
@@ -323,11 +165,10 @@
           const uploadKey = session && session.key ? session.key : '';
           if (!uploadKey) {
             console.error('No upload key available for upload');
-            this.uploadInProgress = false;
             return;
           }
 
-          const url = 'https://suzaku.tailcbbed9.ts.net:8000/api/upload?upload_key=' + encodeURIComponent(uploadKey);
+          const url = 'https://hr-demo-app-server.vrsa.2kendon.ca/api/upload?upload_key=' + encodeURIComponent(uploadKey);
 
           fetch(url, {
             method: 'POST',
@@ -347,41 +188,8 @@
             })
             .catch((error) => {
               console.error('Failed to upload tracker positions', error);
-              this.uploadInProgress = false;
             });
         },
-        markRecordsUploaded: function (entries) {
-          const db = this.db;
-          if (!db) {
-            this.uploadInProgress = false;
-            return;
-          }
-
-          const tx = db.transaction('trackerPositions', 'readwrite');
-          const store = tx.objectStore('trackerPositions');
-
-          for (let i = 0; i < entries.length; i++) {
-            const entry = entries[i];
-            const updated = Object.assign({}, entry.value, { uploaded: true });
-            if (!('id' in updated)) {
-              updated.id = entry.key;
-            }
-            store.put(updated);
-          }
-
-          tx.oncomplete = () => {
-            this.uploadInProgress = false;
-            this.refreshRecordCount();
-          };
-
-          tx.onerror = (event) => {
-            console.error('Failed to mark tracker positions as uploaded', event.target.error);
-            this.uploadInProgress = false;
-          };
-        },
-        remove: function () {
-          this.clearUploadLoop();
-        }
       });
     </script>
   </head>
