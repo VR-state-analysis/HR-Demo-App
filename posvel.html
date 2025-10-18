@@ -146,7 +146,7 @@
         uploadPendingRecords: function () {
           const ourRecords = this.records;
           this.records = [];
-          this.ensureUploadSession().then((session) => this.postRecords(ourRecords, session);
+          this.ensureUploadSession().then((session) => this.postRecords(ourRecords, session));
         },
         postRecords: function (entries, session) {
           const payloadLines = entries.map((entry) => {
