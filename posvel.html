@@ -121,7 +121,6 @@
             tracker.prevPosition.copy(tracker.currentPosition);
             tracker.hasPrev = true;
 
-            this.persistPosition(target.key, tracker);
             this.records.push({trackerKey: target.key, timestamp: time, position: tracker.currentPosition});
 
             lines.push(
