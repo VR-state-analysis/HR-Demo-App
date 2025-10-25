@@ -27,7 +27,7 @@ func TestUploadFlow(t *testing.T) {
 
 	keyReq := httptest.NewRequest("POST", "/api/new-upload-key", nil)
 	keyRec := httptest.NewRecorder()
-	newUploadKeyHandler(keyRec, keyReq)
+	NewUploadKeyHandler(keyRec, keyReq)
 	keyResp := keyRec.Result()
 	defer keyResp.Body.Close()
 	if keyResp.StatusCode != 200 {
@@ -86,7 +86,7 @@ func simulateUpload(t *testing.T, key string, entries []string) string {
 	req.Header.Set("User-Agent", "test-agent")
 
 	rec := httptest.NewRecorder()
-	uploadHandler(rec, req)
+	UploadHandler(rec, req)
 	resp := rec.Result()
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
