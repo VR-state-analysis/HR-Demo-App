@@ -21,10 +21,6 @@ import (
 var uploadKeys = []string{}
 var uploadKeysMutex sync.Mutex
 
-// followPositions tracks the last read line index for each upload key
-var followPositions = make(map[string]int)
-var followPositionsMutex sync.Mutex
-
 const (
 	uploadDir             = "uploads"
 	uploadKeyHexLength    = 128
@@ -399,21 +395,29 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get position from query parameter (defaults to 0)
+	positionStr := r.URL.Query().Get("position")
+	lastPosition := 0
+	if positionStr != "" {
+		var err error
+		lastPosition, err = strconv.Atoi(positionStr)
+		if err != nil || lastPosition < 0 {
+			http.Error(w, "invalid position parameter: must be a non-negative integer", http.StatusBadRequest)
+			return
+		}
+	}
+
 	uploadName := uploadNameFromKey(uploadKey)
 	filename := fmt.Sprintf("%s_%s.csv", uploadName, uploadKey)
 	filePath := filepath.Join(uploadDir, filename)
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		// File doesn't exist yet, return 204 No Content
+		// File doesn't exist yet, return 204 No Content with current position
+		w.Header().Set("X-Follow-Position", strconv.Itoa(lastPosition))
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-
-	// Get last read position for this upload key
-	followPositionsMutex.Lock()
-	lastPosition := followPositions[uploadKey]
-	followPositionsMutex.Unlock()
 
 	// Read the file and get new lines
 	file, err := os.Open(filePath)
@@ -429,6 +433,7 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Skip metadata line
 	if !scanner.Scan() {
+		w.Header().Set("X-Follow-Position", strconv.Itoa(lastPosition))
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -453,20 +458,17 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// No new lines, return 204 No Content
+	// No new lines, return 204 No Content with current position
 	if len(newLines) == 0 {
+		w.Header().Set("X-Follow-Position", strconv.Itoa(lastPosition))
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	// Update the last read position
-	followPositionsMutex.Lock()
-	followPositions[uploadKey] = currentLine
-	followPositionsMutex.Unlock()
+	log.Printf("follow read upload_key=%q upload_name=%q last_position=%d new_lines=%d current_position=%d", uploadKey, uploadName, lastPosition, len(newLines), currentLine)
 
-	log.Printf("follow read upload_key=%q upload_name=%q last_position=%d new_lines=%d", uploadKey, uploadName, lastPosition, len(newLines))
-
-	// Return new lines as newline-delimited text
+	// Return new lines with updated position in header
+	w.Header().Set("X-Follow-Position", strconv.Itoa(currentLine))
 	w.Header().Set("Content-Type", "text/plain")
 	for _, line := range newLines {
 		fmt.Fprintf(w, "%s\n", line)

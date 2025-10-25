@@ -182,12 +182,16 @@ func TestFollowHandler(t *testing.T) {
 		t.Fatalf("decode key response: %v", err)
 	}
 
-	// Test 1: Follow on non-existent file should return 204
+	// Test 1: Follow on non-existent file should return 204 with position 0
 	followReq := httptest.NewRequest("GET", "/api/follow?upload_key="+keyPayload.UploadKey, nil)
 	followRec := httptest.NewRecorder()
 	FollowHandler(followRec, followReq)
 	if followRec.Code != 204 {
 		t.Fatalf("follow on non-existent file: want 204, got %d", followRec.Code)
+	}
+	position := followRec.Header().Get("X-Follow-Position")
+	if position != "0" {
+		t.Fatalf("follow on non-existent file: want position 0, got %s", position)
 	}
 
 	// Upload first batch of data
@@ -197,12 +201,16 @@ func TestFollowHandler(t *testing.T) {
 	}
 	simulateUpload(t, keyPayload.UploadKey, firstEntries)
 
-	// Test 2: First follow should return all lines
+	// Test 2: First follow should return all lines and position 2
 	followReq = httptest.NewRequest("GET", "/api/follow?upload_key="+keyPayload.UploadKey, nil)
 	followRec = httptest.NewRecorder()
 	FollowHandler(followRec, followReq)
 	if followRec.Code != 200 {
 		t.Fatalf("first follow: want 200, got %d", followRec.Code)
+	}
+	position = followRec.Header().Get("X-Follow-Position")
+	if position != "2" {
+		t.Fatalf("first follow: want position 2, got %s", position)
 	}
 	firstFollowLines := strings.Split(strings.TrimSpace(followRec.Body.String()), "\n")
 	if len(firstFollowLines) != 2 {
@@ -223,12 +231,16 @@ func TestFollowHandler(t *testing.T) {
 		}
 	}
 
-	// Test 3: Second follow with no new data should return 204
-	followReq = httptest.NewRequest("GET", "/api/follow?upload_key="+keyPayload.UploadKey, nil)
+	// Test 3: Second follow with position 2 and no new data should return 204
+	followReq = httptest.NewRequest("GET", "/api/follow?upload_key="+keyPayload.UploadKey+"&position="+position, nil)
 	followRec = httptest.NewRecorder()
 	FollowHandler(followRec, followReq)
 	if followRec.Code != 204 {
 		t.Fatalf("follow with no new data: want 204, got %d", followRec.Code)
+	}
+	newPosition := followRec.Header().Get("X-Follow-Position")
+	if newPosition != "2" {
+		t.Fatalf("follow with no new data: want position 2, got %s", newPosition)
 	}
 
 	// Upload second batch
@@ -238,12 +250,16 @@ func TestFollowHandler(t *testing.T) {
 	}
 	simulateUpload(t, keyPayload.UploadKey, secondEntries)
 
-	// Test 4: Third follow should return only new lines
-	followReq = httptest.NewRequest("GET", "/api/follow?upload_key="+keyPayload.UploadKey, nil)
+	// Test 4: Third follow with position 2 should return only new lines (3 and 4)
+	followReq = httptest.NewRequest("GET", "/api/follow?upload_key="+keyPayload.UploadKey+"&position="+position, nil)
 	followRec = httptest.NewRecorder()
 	FollowHandler(followRec, followReq)
 	if followRec.Code != 200 {
 		t.Fatalf("follow with new data: want 200, got %d", followRec.Code)
+	}
+	position = followRec.Header().Get("X-Follow-Position")
+	if position != "4" {
+		t.Fatalf("follow with new data: want position 4, got %s", position)
 	}
 	secondFollowLines := strings.Split(strings.TrimSpace(followRec.Body.String()), "\n")
 	if len(secondFollowLines) != 2 {
@@ -259,11 +275,15 @@ func TestFollowHandler(t *testing.T) {
 		}
 	}
 
-	// Test 5: Fourth follow should return 204 again
-	followReq = httptest.NewRequest("GET", "/api/follow?upload_key="+keyPayload.UploadKey, nil)
+	// Test 5: Fourth follow with position 4 should return 204 again
+	followReq = httptest.NewRequest("GET", "/api/follow?upload_key="+keyPayload.UploadKey+"&position="+position, nil)
 	followRec = httptest.NewRecorder()
 	FollowHandler(followRec, followReq)
 	if followRec.Code != 204 {
 		t.Fatalf("final follow with no new data: want 204, got %d", followRec.Code)
+	}
+	newPosition = followRec.Header().Get("X-Follow-Position")
+	if newPosition != "4" {
+		t.Fatalf("final follow with no new data: want position 4, got %s", newPosition)
 	}
 }
