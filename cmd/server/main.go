@@ -31,6 +31,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/new-upload-key", server.NewUploadKeyHandler)
 	mux.HandleFunc("POST /api/upload", server.UploadHandler)
+	mux.HandleFunc("GET /api/follow", server.FollowHandler)
 
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("/", fileServer)

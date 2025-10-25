@@ -363,3 +363,114 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("failed to write response: %v", err)
 	}
 }
+
+func FollowHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		panic("only GET allowed")
+	}
+
+	uploadKey := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("upload_key")))
+	if uploadKey == "" {
+		http.Error(w, "missing upload_key query parameter", http.StatusBadRequest)
+		return
+	}
+
+	if len(uploadKey) != uploadKeyHexLength {
+		http.Error(w, fmt.Sprintf("invalid upload_key length: expected %d-character hex string", uploadKeyHexLength), http.StatusBadRequest)
+		return
+	}
+
+	if _, err := hex.DecodeString(uploadKey); err != nil {
+		http.Error(w, "invalid upload_key format: must be hexadecimal", http.StatusBadRequest)
+		return
+	}
+
+	validUploadKey := func() bool {
+		uploadKeysMutex.Lock()
+		defer uploadKeysMutex.Unlock()
+		return slices.Contains(uploadKeys, uploadKey)
+	}()
+	if !validUploadKey {
+		http.Error(w, "invalid upload_key value: generate another one and try again", http.StatusBadRequest)
+		return
+	}
+
+	// Get position from query parameter (defaults to 0)
+	positionStr := r.URL.Query().Get("position")
+	lastPosition := 0
+	if positionStr != "" {
+		var err error
+		lastPosition, err = strconv.Atoi(positionStr)
+		if err != nil || lastPosition < 0 {
+			http.Error(w, "invalid position parameter: must be a non-negative integer", http.StatusBadRequest)
+			return
+		}
+	}
+
+	uploadName := uploadNameFromKey(uploadKey)
+	filename := fmt.Sprintf("%s_%s.csv", uploadName, uploadKey)
+	filePath := filepath.Join(uploadDir, filename)
+
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// File doesn't exist yet, return 204 No Content with current position
+		w.Header().Set("X-Follow-Position", strconv.Itoa(lastPosition))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Read the file and get new lines
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Printf("failed to open upload file for follow: %v", err)
+		http.Error(w, "failed to read upload file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 1024), 16*1024*1024)
+
+	// Skip metadata line
+	if !scanner.Scan() {
+		w.Header().Set("X-Follow-Position", strconv.Itoa(lastPosition))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Read all lines and collect ones after lastPosition
+	currentLine := 0
+	var newLines []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		currentLine++
+		if currentLine > lastPosition {
+			newLines = append(newLines, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("failed to scan upload file: %v", err)
+		http.Error(w, "failed to read upload file", http.StatusInternalServerError)
+		return
+	}
+
+	// No new lines, return 204 No Content with current position
+	if len(newLines) == 0 {
+		w.Header().Set("X-Follow-Position", strconv.Itoa(lastPosition))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	log.Printf("follow read upload_key=%q upload_name=%q last_position=%d new_lines=%d current_position=%d", uploadKey, uploadName, lastPosition, len(newLines), currentLine)
+
+	// Return new lines with updated position in header
+	w.Header().Set("X-Follow-Position", strconv.Itoa(currentLine))
+	w.Header().Set("Content-Type", "text/plain")
+	for _, line := range newLines {
+		fmt.Fprintf(w, "%s\n", line)
+	}
+}
