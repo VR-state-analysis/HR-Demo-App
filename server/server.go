@@ -21,16 +21,6 @@ import (
 var uploadKeys = []string{}
 var uploadKeysMutex sync.Mutex
 
-type DataEntry struct {
-	TrackerKey string `json:"trackerKey"`
-	Timestamp  int64  `json:"timestamp"`
-	Position   struct {
-		X float64 `json:"x"`
-		Y float64 `json:"y"`
-		Z float64 `json:"z"`
-	} `json:"position"`
-}
-
 const (
 	uploadDir             = "uploads"
 	uploadKeyHexLength    = 128
