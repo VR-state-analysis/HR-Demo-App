@@ -21,6 +21,10 @@ import (
 var uploadKeys = []string{}
 var uploadKeysMutex sync.Mutex
 
+// followPositions tracks the last read line index for each upload key
+var followPositions = make(map[string]int)
+var followPositionsMutex sync.Mutex
+
 const (
 	uploadDir             = "uploads"
 	uploadKeyHexLength    = 128
@@ -361,5 +365,110 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("failed to write response: %v", err)
+	}
+}
+
+func FollowHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		panic("only GET allowed")
+	}
+
+	uploadKey := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("upload_key")))
+	if uploadKey == "" {
+		http.Error(w, "missing upload_key query parameter", http.StatusBadRequest)
+		return
+	}
+
+	if len(uploadKey) != uploadKeyHexLength {
+		http.Error(w, fmt.Sprintf("invalid upload_key length: expected %d-character hex string", uploadKeyHexLength), http.StatusBadRequest)
+		return
+	}
+
+	if _, err := hex.DecodeString(uploadKey); err != nil {
+		http.Error(w, "invalid upload_key format: must be hexadecimal", http.StatusBadRequest)
+		return
+	}
+
+	validUploadKey := func() bool {
+		uploadKeysMutex.Lock()
+		defer uploadKeysMutex.Unlock()
+		return slices.Contains(uploadKeys, uploadKey)
+	}()
+	if !validUploadKey {
+		http.Error(w, "invalid upload_key value: generate another one and try again", http.StatusBadRequest)
+		return
+	}
+
+	uploadName := uploadNameFromKey(uploadKey)
+	filename := fmt.Sprintf("%s_%s.csv", uploadName, uploadKey)
+	filePath := filepath.Join(uploadDir, filename)
+
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// File doesn't exist yet, return 204 No Content
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Get last read position for this upload key
+	followPositionsMutex.Lock()
+	lastPosition := followPositions[uploadKey]
+	followPositionsMutex.Unlock()
+
+	// Read the file and get new lines
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Printf("failed to open upload file for follow: %v", err)
+		http.Error(w, "failed to read upload file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 1024), 16*1024*1024)
+
+	// Skip metadata line
+	if !scanner.Scan() {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Read all lines and collect ones after lastPosition
+	currentLine := 0
+	var newLines []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		currentLine++
+		if currentLine > lastPosition {
+			newLines = append(newLines, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("failed to scan upload file: %v", err)
+		http.Error(w, "failed to read upload file", http.StatusInternalServerError)
+		return
+	}
+
+	// No new lines, return 204 No Content
+	if len(newLines) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Update the last read position
+	followPositionsMutex.Lock()
+	followPositions[uploadKey] = currentLine
+	followPositionsMutex.Unlock()
+
+	log.Printf("follow read upload_key=%q upload_name=%q last_position=%d new_lines=%d", uploadKey, uploadName, lastPosition, len(newLines))
+
+	// Return new lines as newline-delimited text
+	w.Header().Set("Content-Type", "text/plain")
+	for _, line := range newLines {
+		fmt.Fprintf(w, "%s\n", line)
 	}
 }
