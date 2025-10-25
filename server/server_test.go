@@ -208,7 +208,7 @@ func TestFollowHandler(t *testing.T) {
 	if len(firstFollowLines) != 2 {
 		t.Fatalf("first follow: want 2 lines, got %d", len(firstFollowLines))
 	}
-	// Check format: should be "index,json_payload"
+	// Verify format: lines are already in "index,json_payload" format from CSV file
 	for i, line := range firstFollowLines {
 		parts := strings.SplitN(line, ",", 2)
 		if len(parts) != 2 {
