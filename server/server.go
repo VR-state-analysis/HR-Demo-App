@@ -385,15 +385,15 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validUploadKey := func() bool {
-		uploadKeysMutex.Lock()
-		defer uploadKeysMutex.Unlock()
-		return slices.Contains(uploadKeys, uploadKey)
-	}()
-	if !validUploadKey {
-		http.Error(w, "invalid upload_key value: generate another one and try again", http.StatusBadRequest)
-		return
-	}
+	// validUploadKey := func() bool {
+	// 	uploadKeysMutex.Lock()
+	// 	defer uploadKeysMutex.Unlock()
+	// 	return slices.Contains(uploadKeys, uploadKey)
+	// }()
+	// if !validUploadKey {
+	// 	http.Error(w, "invalid upload_key value: generate another one and try again", http.StatusBadRequest)
+	// 	return
+	// }
 
 	// Get position from query parameter (defaults to 0)
 	positionStr := r.URL.Query().Get("position")
