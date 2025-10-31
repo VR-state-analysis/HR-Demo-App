@@ -13,6 +13,7 @@
           this.currentText = '';
           this.records = [];
           this.recordCount = 0;
+          this.message = '';
           this.uploadSession = { key: null, name: null };
           this.boundUnloadHandler = null;
           this.uploadInterval = setInterval(this.uploadPendingRecords.bind(this), 3000);
@@ -121,7 +122,7 @@
             tracker.prevPosition.copy(tracker.currentPosition);
             tracker.hasPrev = true;
 
-            this.records.push({trackerKey: target.key, timestamp: time, position: tracker.currentPosition});
+            this.records.push({trackerKey: target.key, epoch: Date.now(), timestamp: time, position: tracker.currentPosition});
 
             lines.push(
               target.label + ' Pos (m): ' + this.formatVector(tracker.currentPosition) + '\n' +
@@ -134,6 +135,7 @@
           }
 
           lines.push('Stored samples: ' + this.recordCount);
+          lines.push('Message: ' + this.message);
 
           this.prevTime = time;
           const message = lines.join('\n');
@@ -142,18 +144,24 @@
             this.textEl.setAttribute('value', message);
           }
         },
-        uploadPendingRecords: function () {
+        uploadPendingRecords: async function () {
           const ourRecords = this.records;
           this.records = [];
+          try {
+          await this.ensureUploadSession()
+          await this.postRecords(ourRecords, this.uploadSession);
+          } catch (e) {
+          this.message = e.toString();
+          }
           this.recordCount += ourRecords.length;
-          this.ensureUploadSession().then((session) => this.postRecords(ourRecords, session));
         },
         postRecords: function (entries, session) {
           const payloadLines = entries.map((entry) => {
             return JSON.stringify({
-              trackerKey: entry.value.trackerKey,
-              timestamp: entry.value.timestamp,
-              position: entry.value.position
+              trackerKey: entry.trackerKey,
+              epoch: entry.epoch,
+              timestamp: entry.timestamp,
+              position: entry.position
             });
           });
 
@@ -182,9 +190,6 @@
                 throw new Error('Unexpected response status ' + response.status);
               }
               return response.text().catch(() => '');
-            })
-            .then(() => {
-              this.markRecordsUploaded(entries);
             })
             .catch((error) => {
               console.error('Failed to upload tracker positions', error);
