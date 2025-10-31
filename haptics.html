@@ -1,0 +1,184 @@
+<html>
+  <head>
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    <script>
+      const uploadKey = "e5ad199d2fdd8f264cedfa43d80bb8e4ad5810436f3aeee9249615eb1cd0e9d581baff75a85b602e70499ff68bbf8b7ba9e0417333e4aa4b99d59aa97bdd3f34";
+      let latestPosition = 0;
+      let lines = [];
+      let pulsing = false;
+
+      /* Pulse all XR controllers via WebXR gamepad haptics.
+         Usage #1 (direct): el.components['pulse-controllers'].pulseAll({intensity: 1, duration: 120});
+         Usage #2 (event):  <a-entity pulse-controllers="event: shoot"></a-entity> ... el.emit('shoot');
+      */
+      AFRAME.registerComponent('pulse-controllers', {
+        schema: {
+          intensity: { default: 1.0 },   // 0.0 – 1.0
+          duration:  { default: 50 },   // ms
+          event:     { type: 'string', default: '' } // optional custom event name to listen for
+        },
+      
+        init: function () {
+          this.session = null;
+          this._onEnterVR = this._onEnterVR.bind(this);
+          this._onExitVR  = this._onExitVR.bind(this);
+      
+          const scene = this.el.sceneEl;
+      
+          // Ensure renderer exists, then wire XR session listeners.
+          const attachXRListeners = () => {
+            scene.addEventListener('enter-vr', this._onEnterVR);
+            scene.addEventListener('exit-vr', this._onExitVR);
+          };
+          if (scene.renderer) attachXRListeners();
+          else scene.addEventListener('render-target-loaded', attachXRListeners, { once: true });
+      
+          // Optional event trigger (e.g., event: shoot)
+          if (this.data.event) {
+            this.el.addEventListener(this.data.event, () => this.pulseAll());
+          }
+        },
+      
+        _onEnterVR: function () {
+          const xr = this.el.sceneEl.renderer && this.el.sceneEl.renderer.xr;
+          this.session = xr && xr.getSession ? xr.getSession() : null;
+        },
+      
+        _onExitVR: function () {
+          this.session = null;
+        },
+      
+        /** Public API — call this from your own callback */
+        pulseAll: async function (opts) {
+          const session = this.session ||
+            (this.el.sceneEl.renderer?.xr?.getSession?.() || null);
+          if (!session) return;
+      
+          const intensity = Math.min(1, Math.max(0,
+            (opts && opts.intensity) != null ? opts.intensity : this.data.intensity
+          ));
+          const duration = Math.max(1,
+            (opts && opts.duration) != null ? opts.duration : this.data.duration
+          );
+      
+          const pulses = [];
+          for (const src of session.inputSources) {
+            const gp = src?.gamepad;
+            if (!gp) continue;
+      
+            // Common on Quest/Chrome
+            const actuators = gp.hapticActuators || gp.haptics || [];
+            const a0 = actuators[0];
+            if (a0 && typeof a0.pulse === 'function') {
+              pulses.push(a0.pulse(intensity, duration).catch(() => {}));
+              continue;
+            }
+      
+            // Fallback for some gamepads
+            const vib = gp.vibrationActuator;
+            if (vib && typeof vib.playEffect === 'function') {
+              pulses.push(
+                vib.playEffect('dual-rumble', {
+                  duration,
+                  strongMagnitude: intensity,
+                  weakMagnitude: intensity
+                }).catch(() => {})
+              );
+            }
+          }
+      
+          try { await Promise.all(pulses); } catch (_) {}
+        },
+      
+        remove: function () {
+          const scene = this.el.sceneEl;
+          scene.removeEventListener('enter-vr', this._onEnterVR);
+          scene.removeEventListener('exit-vr', this._onExitVR);
+        }
+      });
+
+      async function follow() {
+        const params = new URLSearchParams({upload_key: uploadKey, position: latestPosition});
+        const resp = await fetch(`/api/follow?${params.toString()}`);
+        const data = await resp.text();
+        const moreLines = data.split('\n').map((line) => {
+          try {
+            return JSON.parse(line.slice(line.indexOf(',')+1));
+          } catch (e) {
+            return {}
+          };
+        });
+        console.log('moreLines', moreLines);
+        latestPosition = resp.headers.get('X-Follow-Position')
+        // document.getElementById("showPosVelText").setAttribute('value', `position ${latestPosition} length ${moreLines.length} ${moreLines[0].rr_ms}`);
+        return moreLines;
+      }
+
+      async function dl() {
+        if (!document.getElementById("showPosVelText")) {
+          console.log('skip');
+          setTimeout(dl, 1000);
+          return;
+        }
+        document.getElementById("showPosVelText").setAttribute('value', `Downloading...`);
+        let newLines;
+        try {
+          newLines = await follow();
+        } catch (e) {
+          console.error(e);
+          document.getElementById("showPosVelText").setAttribute('value', 'error: '+e.toString());
+        }
+        lines.push.apply(lines, newLines);
+        if (lines.length > 20) {
+          lines = lines.slice(-20);
+        }
+        console.log(`pushed`);
+        document.getElementById("showPosVelText").setAttribute('value', `Downloaded ${newLines.length} more lines.`);
+        console.log(`pulsing=${pulsing}`);
+        if (!pulsing) {
+          pulsing = true;
+          setTimeout(startPulse, 0);
+          console.log('start pulsing');
+        }
+        setTimeout(dl, 5000);
+      }
+      dl();
+
+      //setTimeout(startPulse, 1000);
+
+      function startPulse() {
+        try {
+          console.log(lines);
+          const latestLine = lines[0];
+          lines = lines.splice(1);
+          console.log(`pulsing ${latestLine.rr_ms}`);
+          const el = document.getElementById('hfx');
+          el.components['pulse-controllers'].pulseAll({intensity: 1, duration: 50});
+          setTimeout(() => {
+            el.components['pulse-controllers'].pulseAll({intensity: 0.5, duration: 50});
+          }, 100);
+          document.getElementById("showPosVelText").setAttribute('value', `RR: ${latestLine.rr_ms} ms (${lines.length})`);
+          setTimeout(startPulse, latestLine.rr_ms);
+        } catch (e) {
+          setTimeout(startPulse, 100);
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <a-scene vr-mode-ui="enabled: true">
+      <a-box position="-1 0.5 -3" rotation="0 45 0" color="#4CC3D9"></a-box>
+      <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
+      <a-cylinder position="1 0.75 -3" radius="0.5" height="1.5" color="#FFC65D"></a-cylinder>
+      <a-plane position="0 0 -4" rotation="-90 0 0" width="4" height="4" color="#7BC8A4"></a-plane>
+      <a-sky color="#ECECEC"></a-sky>
+      <a-entity id="showPosVel" position="0 1.2 -2">
+        <a-plane width="1" height="0.3" material="color: #FFFCAB; shader: flat"></a-plane>
+        <a-text id="showPosVelText" value="Wait…" align="center" color="#333" width="2" position="0 0 0.02"></a-text>
+      </a-entity>
+      <a-entity id="hfx" pulse-controllers="intensity: 0.8; duration: 120; event: pulse"></a-entity>
+      <a-entity id="leftHand" laser-controls="hand: left" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
+      <a-entity id="rightHand" laser-controls="hand: right" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
+    </a-scene>
+  </body>
+</html>

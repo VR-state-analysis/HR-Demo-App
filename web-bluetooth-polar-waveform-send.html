@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>RR Intervals via Web Bluetooth</title>
+  <title>HR Waveforms via Web Bluetooth</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {
@@ -28,7 +28,7 @@
   </style>
 </head>
 <body>
-  <h1>RR Interval Collector</h1>
+  <h1>HR Waveform Collector</h1>
   <p>
     Connect your Polar H10.
     Once connected, this webapp will start streaming the Heart Rate Measurement characteristic (0x2A37) data to the server.
@@ -135,6 +135,11 @@
       bpmElem.textContent = Number.isFinite(bpm) ? Math.round(bpm) : '—';
       rrmsElem.textContent = Number.isFinite(lastRRms) ? lastRRms.toFixed(1) : '—';
       sampleCountElem.textContent = rrLog.length;
+      // rolling mean of last 10
+      const slice = rrLog.slice(-10);
+      const mean = slice.length
+        ? slice.reduce((s, x) => s + x.rr_ms, 0) / slice.length
+        : NaN;
     }
 
     // --- Upload helpers ---
@@ -290,7 +295,7 @@
       return { bpm, rrSeconds };
     }
 
-    async function onHeartRateMeasurement(event) {
+    function onHeartRateMeasurement(event) {
       const dv = event.target.value;
       const { bpm, rrSeconds } = parseHeartRateValue(dv);
 
@@ -301,9 +306,8 @@
         const entry = { tsISO, bpm, rr_s, rr_ms };
         rrLog.push(entry);
         appendRow(entry);
+        uploadRecords([entry], uploadSession);
       });
-
-      await uploadRecords(rrSeconds.map(rr_s => ({ tsISO, bpm, rr_s, rr_ms: rr_s * 1000 })), uploadSession);
 
       // Update headline stats using the last RR in this packet if any.
       const lastRRms = rrSeconds.length ? rrSeconds[rrSeconds.length - 1] * 1000 : NaN;
