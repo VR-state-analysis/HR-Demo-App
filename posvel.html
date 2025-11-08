@@ -122,7 +122,7 @@
             tracker.prevPosition.copy(tracker.currentPosition);
             tracker.hasPrev = true;
 
-            this.records.push({trackerKey: target.key, epoch: Date.now(), timestamp: time, position: tracker.currentPosition});
+            this.records.push({trackerKey: target.key, epoch: Date.now(), timestamp: time, position: {...tracker.currentPosition}});
 
             lines.push(
               target.label + ' Pos (m): ' + this.formatVector(tracker.currentPosition) + '\n' +
