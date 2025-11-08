@@ -129,9 +129,6 @@
           document.getElementById("showPosVelText").setAttribute('value', 'error: '+e.toString());
         }
         lines.push.apply(lines, newLines);
-        if (lines.length > 20) {
-          lines = lines.slice(-20);
-        }
         console.log(`pushed`);
         document.getElementById("showPosVelText").setAttribute('value', `Downloaded ${newLines.length} more lines.`);
         console.log(`pulsing=${pulsing}`);
