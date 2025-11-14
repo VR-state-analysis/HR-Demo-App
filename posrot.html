@@ -18,6 +18,30 @@
           this.uploadSession = { key: null, name: null };
           this.boundUnloadHandler = null;
           this.uploadInterval = setInterval(this.uploadPendingRecords.bind(this), 3000);
+          this.isRecording = false;
+          this.listenersAttached = false;
+        },
+        setupControllerListeners: function () {
+          if (this.listenersAttached) { return; }
+          
+          const leftHand = this.resolveController('leftHand');
+          const rightHand = this.resolveController('rightHand');
+          
+          if (leftHand && rightHand) {
+            const self = this;
+            leftHand.addEventListener('triggerdown', function() {
+              self.toggleRecording();
+            });
+            rightHand.addEventListener('triggerdown', function() {
+              self.toggleRecording();
+            });
+            this.listenersAttached = true;
+            this.message = 'Ready - Press trigger to record';
+          }
+        },
+        toggleRecording: function () {
+          this.isRecording = !this.isRecording;
+          this.message = this.isRecording ? 'RECORDING' : 'STOPPED';
         },
         update: function () {
           this.textEl = this.data.target || this.el.querySelector('a-text');
@@ -89,6 +113,7 @@
         },
         tick: function (time, delta) {
           this.updateCamera();
+          this.setupControllerListeners();
           if (!this.textEl) { return; }
           const sceneEl = this.el.sceneEl;
           if (!sceneEl) { return; }
@@ -125,7 +150,9 @@
             tracker.prevPosition.copy(tracker.currentPosition);
             tracker.hasPrev = true;
 
-            this.records.push({trackerKey: target.key, epoch: Date.now(), timestamp: time, position: {...tracker.currentPosition}, rotation: {...tracker.currentRotation}});
+            if (this.isRecording) {
+              this.records.push({trackerKey: target.key, epoch: Date.now(), timestamp: time, position: {...tracker.currentPosition}, rotation: {...tracker.currentRotation}});
+            }
 
             lines.push(
               target.label + ' Pos (m): ' + this.formatVector(tracker.currentPosition) + '\n' +
@@ -137,6 +164,7 @@
             lines.push('Upload name: ' + this.uploadSession.name);
           }
 
+          lines.push('Recording: ' + (this.isRecording ? 'ON' : 'OFF'));
           lines.push('Stored samples: ' + this.recordCount);
           lines.push('Message: ' + this.message);
 
