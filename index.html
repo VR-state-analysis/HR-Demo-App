@@ -1,16 +1,41 @@
 <html>
   <head>
     <title>HR-Demo-App Server</title>
+    <style>
+      body {
+        background-color: #eee;
+        font-family: system-ui sans-serif;
+      }
+      .demo-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+        gap: clamp(8px, 1svw, 16px);
+        padding-left: 0;
+      }
+      .demo-list > li {
+        list-style-type: none;
+        background-color: white;
+        box-shadow: 0 4px 0 rgba(0, 0, 0, 0.1);
+        padding: 4px;
+      }
+      .demo-list > li > a {
+        display: block;
+        width: 100%;
+        height: 100%;
+        text-decoration: none;
+      }
+    </style>
   </head>
   <body>
     <h1>HR-Demo-App Server</h1>
     <h2>Demos</h2>
-    <ul>
+    Click on a tile (the entire tile is a link) to go to that demo.
+    <ul class="demo-list">
       <li>
         <a href="posvel.html">Real-time continuous position and velocity collection webapp</a>
       </li>
       <li>
-        <a href="posrot.html">Continuous position and rotation collection</a>
+        <a href="posrot.html">Continuous position and rotation collection using controllers</a>
       </li>
       <li>
         <a href="click-works.html">Button click demo</a>
