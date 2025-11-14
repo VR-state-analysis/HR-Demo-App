@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Position Replay Viewer</title>
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    <style>
+      #controls {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 15px;
+        border-radius: 8px;
+        font-family: Arial, sans-serif;
+        z-index: 1000;
+        max-width: 300px;
+      }
+      #controls input[type="text"] {
+        width: 100%;
+        padding: 5px;
+        margin: 5px 0;
+        box-sizing: border-box;
+      }
+      #controls button {
+        padding: 8px 15px;
+        margin: 5px 5px 5px 0;
+        cursor: pointer;
+      }
+      #controls .status {
+        margin-top: 10px;
+        padding: 8px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+      #controls label {
+        display: block;
+        margin: 10px 0 5px 0;
+        font-weight: bold;
+      }
+    </style>
+    <script>
+      AFRAME.registerComponent('position-replay', {
+        schema: {
+          uploadKey: { type: 'string', default: '' },
+          speed: { type: 'number', default: 1.0 }
+        },
+        init: function () {
+          this.records = [];
+          this.currentIndex = 0;
+          this.isPlaying = false;
+          this.lastTimestamp = null;
+          this.startTime = null;
+          this.position = 0;
+          this.pollInterval = null;
+          this.isLoading = false;
+
+          // Create visualizations for headset and controllers
+          this.headset = document.createElement('a-box');
+          this.headset.setAttribute('color', '#4CC3D9');
+          this.headset.setAttribute('width', '0.15');
+          this.headset.setAttribute('height', '0.1');
+          this.headset.setAttribute('depth', '0.2');
+          this.el.appendChild(this.headset);
+
+          this.leftController = document.createElement('a-sphere');
+          this.leftController.setAttribute('color', '#EF2D5E');
+          this.leftController.setAttribute('radius', '0.05');
+          this.el.appendChild(this.leftController);
+
+          this.rightController = document.createElement('a-sphere');
+          this.rightController.setAttribute('color', '#FFC65D');
+          this.rightController.setAttribute('radius', '0.05');
+          this.el.appendChild(this.rightController);
+
+          // Create trails
+          this.trails = {
+            headset: [],
+            leftController: [],
+            rightController: []
+          };
+
+          window.replayController = this;
+        },
+        update: function () {
+          if (this.data.uploadKey && this.data.uploadKey !== this.lastUploadKey) {
+            this.lastUploadKey = this.data.uploadKey;
+            this.loadData();
+          }
+        },
+        loadData: async function () {
+          if (!this.data.uploadKey || this.isLoading) return;
+          
+          this.isLoading = true;
+          this.updateStatus('Loading data...');
+
+          try {
+            const url = '/api/follow?upload_key=' + encodeURIComponent(this.data.uploadKey) + '&position=' + this.position;
+            const response = await fetch(url);
+
+            if (response.status === 204) {
+              // No new data
+              const newPosition = parseInt(response.headers.get('X-Follow-Position') || '0');
+              this.position = newPosition;
+              this.updateStatus('Loaded ' + this.records.length + ' records. No new data.');
+              this.isLoading = false;
+              return;
+            }
+
+            if (!response.ok) {
+              throw new Error('Failed to load data: ' + response.status);
+            }
+
+            const text = await response.text();
+            const lines = text.trim().split('\n');
+            
+            const newPosition = parseInt(response.headers.get('X-Follow-Position') || '0');
+            this.position = newPosition;
+
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              
+              // Parse CSV format: index,{json}
+              const commaIndex = line.indexOf(',');
+              if (commaIndex === -1) continue;
+              
+              const jsonPart = line.substring(commaIndex + 1);
+              const record = JSON.parse(jsonPart);
+              this.records.push(record);
+            }
+
+            this.updateStatus('Loaded ' + this.records.length + ' records');
+          } catch (error) {
+            console.error('Failed to load data:', error);
+            this.updateStatus('Error: ' + error.message);
+          }
+
+          this.isLoading = false;
+        },
+        startPolling: function () {
+          if (this.pollInterval) return;
+          this.pollInterval = setInterval(() => {
+            this.loadData();
+          }, 2000);
+        },
+        stopPolling: function () {
+          if (this.pollInterval) {
+            clearInterval(this.pollInterval);
+            this.pollInterval = null;
+          }
+        },
+        play: function () {
+          if (this.records.length === 0) {
+            this.updateStatus('No data to play. Load data first.');
+            return;
+          }
+          this.isPlaying = true;
+          this.startTime = Date.now();
+          if (this.currentIndex >= this.records.length) {
+            this.currentIndex = 0;
+          }
+          this.updateStatus('Playing...');
+        },
+        pause: function () {
+          this.isPlaying = false;
+          this.updateStatus('Paused at record ' + this.currentIndex + ' of ' + this.records.length);
+        },
+        reset: function () {
+          this.isPlaying = false;
+          this.currentIndex = 0;
+          this.startTime = null;
+          this.lastTimestamp = null;
+          this.updatePositions();
+          this.updateStatus('Reset to start');
+        },
+        tick: function (time, delta) {
+          if (!this.isPlaying || this.records.length === 0) return;
+
+          // Group data by timestamp
+          const recordsByTimestamp = {};
+          for (const record of this.records) {
+            const ts = record.timestamp;
+            if (!recordsByTimestamp[ts]) {
+              recordsByTimestamp[ts] = {};
+            }
+            recordsByTimestamp[ts][record.trackerKey] = record;
+          }
+
+          const timestamps = Object.keys(recordsByTimestamp).map(Number).sort((a, b) => a - b);
+          
+          if (this.startTime === null) {
+            this.startTime = Date.now();
+            this.lastTimestamp = null;
+          }
+
+          const elapsed = (Date.now() - this.startTime) * this.data.speed;
+          
+          // Find the appropriate timestamp
+          let targetIndex = 0;
+          if (this.lastTimestamp === null && timestamps.length > 0) {
+            this.lastTimestamp = timestamps[0];
+          }
+
+          for (let i = 0; i < timestamps.length; i++) {
+            const ts = timestamps[i];
+            const relativeTime = ts - timestamps[0];
+            if (relativeTime <= elapsed) {
+              targetIndex = i;
+            } else {
+              break;
+            }
+          }
+
+          console.log(targetIndex, elapsed);
+
+          if (targetIndex < timestamps.length) {
+            const currentTimestamp = timestamps[targetIndex];
+            const records = recordsByTimestamp[currentTimestamp];
+
+            if (records.headset) {
+              const pos = records.headset.position;
+              this.headset.setAttribute('position', pos.x + ' ' + pos.y + ' ' + pos.z);
+            }
+
+            if (records.leftController) {
+              const pos = records.leftController.position;
+              this.leftController.setAttribute('position', pos.x + ' ' + pos.y + ' ' + pos.z);
+            }
+
+            if (records.rightController) {
+              const pos = records.rightController.position;
+              this.rightController.setAttribute('position', pos.x + ' ' + pos.y + ' ' + pos.z);
+            }
+
+            this.currentIndex = targetIndex;
+            
+            if (targetIndex >= timestamps.length - 1) {
+              this.isPlaying = false;
+              this.updateStatus('Playback complete');
+            } else {
+              this.updateStatus('Playing: ' + this.currentIndex + ' / ' + timestamps.length);
+            }
+          }
+        },
+        updatePositions: function () {
+          if (this.records.length === 0) return;
+
+          // Reset to first positions
+          const firstRecords = {};
+          for (const record of this.records) {
+            if (!firstRecords[record.trackerKey]) {
+              firstRecords[record.trackerKey] = record;
+            }
+          }
+
+          if (firstRecords.headset) {
+            const pos = firstRecords.headset.position;
+            this.headset.setAttribute('position', pos.x + ' ' + pos.y + ' ' + pos.z);
+          }
+
+          if (firstRecords.leftController) {
+            const pos = firstRecords.leftController.position;
+            this.leftController.setAttribute('position', pos.x + ' ' + pos.y + ' ' + pos.z);
+          }
+
+          if (firstRecords.rightController) {
+            const pos = firstRecords.rightController.position;
+            this.rightController.setAttribute('position', pos.x + ' ' + pos.y + ' ' + pos.z);
+          }
+        },
+        updateStatus: function (message) {
+          const statusEl = document.getElementById('status');
+          if (statusEl) {
+            statusEl.textContent = message;
+          }
+        }
+      });
+
+      // UI Controls
+      window.addEventListener('DOMContentLoaded', function () {
+        const urlParams = new URLSearchParams(window.location.search);
+        const uploadKey = urlParams.get('upload_key') || '';
+        
+        const keyInput = document.getElementById('uploadKey');
+        if (keyInput && uploadKey) {
+          keyInput.value = uploadKey;
+        }
+
+        document.getElementById('loadBtn').addEventListener('click', function () {
+          const key = document.getElementById('uploadKey').value.trim();
+          if (!key) {
+            alert('Please enter an upload key');
+            return;
+          }
+          const scene = document.querySelector('a-scene');
+          const replay = scene.querySelector('[position-replay]');
+          replay.setAttribute('position-replay', 'uploadKey', key);
+          window.replayController.loadData();
+        });
+
+        document.getElementById('pollBtn').addEventListener('click', function () {
+          if (window.replayController.pollInterval) {
+            window.replayController.stopPolling();
+            this.textContent = 'Start Polling';
+          } else {
+            window.replayController.startPolling();
+            this.textContent = 'Stop Polling';
+          }
+        });
+
+        document.getElementById('playBtn').addEventListener('click', function () {
+          window.replayController.play();
+        });
+
+        document.getElementById('pauseBtn').addEventListener('click', function () {
+          window.replayController.pause();
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', function () {
+          window.replayController.reset();
+        });
+
+        document.getElementById('speedInput').addEventListener('change', function () {
+          const scene = document.querySelector('a-scene');
+          const replay = scene.querySelector('[position-replay]');
+          replay.setAttribute('position-replay', 'speed', parseFloat(this.value));
+        });
+
+        // Auto-load if upload_key is in URL
+        if (uploadKey) {
+          setTimeout(function () {
+            const scene = document.querySelector('a-scene');
+            const replay = scene.querySelector('[position-replay]');
+            replay.setAttribute('position-replay', 'uploadKey', uploadKey);
+            window.replayController.loadData();
+          }, 1000);
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <div id="controls">
+      <h3 style="margin-top: 0;">Position Replay Viewer</h3>
+      
+      <label>Upload Key:</label>
+      <input type="text" id="uploadKey" placeholder="Enter upload key">
+      
+      <button id="loadBtn">Load Data</button>
+      <button id="pollBtn">Start Polling</button>
+      
+      <label>Playback:</label>
+      <button id="playBtn">Play</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="resetBtn">Reset</button>
+      
+      <label>Speed:</label>
+      <input type="number" id="speedInput" value="1.0" step="0.1" min="0.1" max="10" style="width: 80px;">
+      
+      <div class="status">
+        <strong>Status:</strong>
+        <div id="status">Ready. Enter upload key and click Load Data.</div>
+      </div>
+    </div>
+
+    <a-scene>
+      <a-entity position-replay></a-entity>
+      
+      <!-- Reference grid -->
+      <a-plane position="0 0 0" rotation="-90 0 0" width="10" height="10" color="#7BC8A4" opacity="0.3"></a-plane>
+      
+      <!-- Lighting -->
+      <a-light type="ambient" color="#BBB"></a-light>
+      <a-light type="directional" color="#FFF" intensity="0.6" position="-1 2 1"></a-light>
+      
+      <!-- Camera -->
+      <a-entity camera look-controls wasd-controls position="0 1.6 3"></a-entity>
+    </a-scene>
+  </body>
+</html>
