@@ -1,3 +1,6 @@
 uploads
 hr-server
 server
+__pycache__
+.direnv
+.envrc
