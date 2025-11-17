@@ -295,7 +295,6 @@ def main():
         return 0
     except Exception as e:
         print(f"Error: {e}")
-        import traceback
         traceback.print_exc()
         return 1
 
