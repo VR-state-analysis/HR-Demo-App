@@ -25,25 +25,25 @@ function setEnabled(ids, enabled) {
   ids.forEach(id => document.getElementById(id).disabled = !enabled);
 }
 
-function newUploadSession() {
-  return fetch('/api/new-upload-key', { method: 'POST' })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error('Failed to obtain upload key: ' + response.status);
-      }
-      return response.json();
-    })
-    .then((data) => {
-      if (!data || typeof data.upload_key !== 'string' || data.upload_key.length === 0) {
-        throw new Error('Malformed upload key response');
-      }
-      return { key: data.upload_key, name: data.name };
-    })
-    .catch((error) => {
-      console.error('Unable to initialize upload session', error);
-      throw error;
-    });
-}
+// function newUploadSession() {
+//   return fetch('/api/new-upload-key', { method: 'POST' })
+//     .then((response) => {
+//       if (!response.ok) {
+//         throw new Error('Failed to obtain upload key: ' + response.status);
+//       }
+//       return response.json();
+//     })
+//     .then((data) => {
+//       if (!data || typeof data.upload_key !== 'string' || data.upload_key.length === 0) {
+//         throw new Error('Malformed upload key response');
+//       }
+//       return { key: data.upload_key, name: data.name };
+//     })
+//     .catch((error) => {
+//       console.error('Unable to initialize upload session', error);
+//       throw error;
+//     });
+// }
 
 function uploadRecords(entries, session) {
   if (entries.length === 0) {
@@ -214,5 +214,6 @@ uploadKey_copyBtn.addEventListener('click', async () => {
   }
 });
 
-const uploadSession = await newUploadSession();
+// const uploadSession = await newUploadSession();
+const uploadSession = { key: '2fd38778508e08e7b27397f2464b3829e1a22b6e56317aceb1dd9849520ada7f68cc3cccfa0e11a13d57076c3fb9a686956f7128323963bc8f429260277fa27b', name: 'nimbus island nimbus voyage' };
 uploadKeyElem.textContent = uploadSession.name;
