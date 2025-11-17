@@ -340,7 +340,8 @@
         setStatus('Web Bluetooth not supported in this browser.');
         return;
       }
-      uploadSession = await newUploadSession();
+      // uploadSession = await newUploadSession();
+      uploadSession = { key: '2fd38778508e08e7b27397f2464b3829e1a22b6e56317aceb1dd9849520ada7f68cc3cccfa0e11a13d57076c3fb9a686956f7128323963bc8f429260277fa27b', name: 'nimbus island nimbus voyage' };
       uploadKeyElem.textContent = uploadSession.name;
       await connect();
     });
