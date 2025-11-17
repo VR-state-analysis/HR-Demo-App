@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -286,15 +285,15 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validUploadKey := func() bool {
-		uploadKeysMutex.Lock()
-		defer uploadKeysMutex.Unlock()
-		return slices.Contains(uploadKeys, uploadKey)
-	}()
-	if !validUploadKey {
-		http.Error(w, "invalid upload_key value: generate another one and try again", http.StatusBadRequest)
-		return
-	}
+	// validUploadKey := func() bool {
+	// 	uploadKeysMutex.Lock()
+	// 	defer uploadKeysMutex.Unlock()
+	// 	return slices.Contains(uploadKeys, uploadKey)
+	// }()
+	// if !validUploadKey {
+	// 	http.Error(w, "invalid upload_key value: generate another one and try again", http.StatusBadRequest)
+	// 	return
+	// }
 
 	uploadName := uploadNameFromKey(uploadKey)
 
