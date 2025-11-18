@@ -1,0 +1,336 @@
+<html>
+  <head>
+    <title>Position/Rotation Collection</title>
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    <script>
+      AFRAME.registerComponent('headset-pos-vel', {
+        schema: { target: { type: 'selector' } },
+        init: function () {
+          this.cameraEl = null;
+          this.textEl = null;
+          this.prevTime = null;
+          this.trackers = {};
+          this.cache = { leftHand: null, rightHand: null };
+          this.currentText = '';
+          this.records = [];
+          this.recordCount = 0;
+          this.message = '';
+          this.uploadSession = { key: 'ce7b590c808318e7f383776a2aad2ac99d8a7cbf793d299b376f090136d124710695bda00593b80891abaec81aac895f740fb45d63b9e716dde013cb2a74ccf1', name: 'island harbor quartz beacon' };
+          this.boundUnloadHandler = null;
+          this.uploadInterval = setInterval(this.uploadPendingRecords.bind(this), 3000);
+          this.isRecording = false;
+          this.listenersAttached = false;
+          this.captchaState = {
+            topPanelTouching: false,
+            bottomPanelTouching: false,
+            topPanelStartTime: null,
+            bottomPanelStartTime: null,
+            topPanelCompleted: false,
+            bottomPanelCompleted: false,
+            requiredTouchDuration: 2000, // 2 seconds
+            captchaComplete: false
+          };
+        },
+        setupControllerListeners: function () {
+          if (this.listenersAttached) { return; }
+          
+          const leftHand = this.resolveController('leftHand');
+          const rightHand = this.resolveController('rightHand');
+          
+          if (leftHand && rightHand) {
+            const self = this;
+            leftHand.addEventListener('triggerdown', function() {
+              self.toggleRecording();
+            });
+            rightHand.addEventListener('triggerdown', function() {
+              self.toggleRecording();
+            });
+            this.listenersAttached = true;
+            this.message = 'Ready - Press trigger to record';
+          }
+        },
+        toggleRecording: function () {
+          this.isRecording = !this.isRecording;
+          this.message = this.isRecording ? 'RECORDING' : 'STOPPED';
+        },
+        update: function () {
+          this.textEl = this.data.target || this.el.querySelector('a-text');
+        },
+        updateCamera: function () {
+          if (this.cameraEl) { return; }
+          const sceneEl = this.el.sceneEl;
+          if (sceneEl && sceneEl.camera && sceneEl.camera.el) {
+            this.cameraEl = sceneEl.camera.el;
+          }
+        },
+        getTracker: function (key) {
+          if (!this.trackers[key]) {
+            this.trackers[key] = {
+              prevPosition: new THREE.Vector3(),
+              currentPosition: new THREE.Vector3(),
+              velocity: new THREE.Vector3(),
+              lastSavedPosition: new THREE.Vector3(),
+              currentRotation: new THREE.Quaternion(),
+              hasPrev: false,
+              hasSaved: false
+            };
+          }
+          return this.trackers[key];
+        },
+        formatVector: function (vec) {
+          return vec.x.toFixed(2) + ', ' + vec.y.toFixed(2) + ', ' + vec.z.toFixed(2);
+        },
+        checkPanelCollision: function (controllerPos, panelPos, panelSize) {
+          const halfWidth = panelSize.width / 2;
+          const halfHeight = panelSize.height / 2;
+          const threshold = 0.1; // 10cm threshold
+          
+          return (
+            Math.abs(controllerPos.x - panelPos.x) < halfWidth + threshold &&
+            Math.abs(controllerPos.y - panelPos.y) < halfHeight + threshold &&
+            Math.abs(controllerPos.z - panelPos.z) < threshold
+          );
+        },
+        updateCaptchaState: function (rightHandPos, time) {
+          const topPanelPos = { x: 0, y: 1.7, z: -0.5 };
+          const bottomPanelPos = { x: 0, y: 1.0, z: -0.5 };
+          const panelSize = { width: 0.15, height: 0.15 };
+          
+          const touchingTop = this.checkPanelCollision(rightHandPos, topPanelPos, panelSize);
+          const touchingBottom = this.checkPanelCollision(rightHandPos, bottomPanelPos, panelSize);
+          
+          // Top panel logic
+          if (touchingTop && !this.captchaState.topPanelCompleted) {
+            if (!this.captchaState.topPanelTouching) {
+              this.captchaState.topPanelTouching = true;
+              this.captchaState.topPanelStartTime = time;
+            } else {
+              const elapsed = time - this.captchaState.topPanelStartTime;
+              if (elapsed >= this.captchaState.requiredTouchDuration) {
+                this.captchaState.topPanelCompleted = true;
+                this.updatePanelColor('topPanel', '#00FF00');
+              }
+            }
+          } else {
+            this.captchaState.topPanelTouching = false;
+            this.captchaState.topPanelStartTime = null;
+          }
+          
+          // Bottom panel logic
+          if (touchingBottom && !this.captchaState.bottomPanelCompleted) {
+            if (!this.captchaState.bottomPanelTouching) {
+              this.captchaState.bottomPanelTouching = true;
+              this.captchaState.bottomPanelStartTime = time;
+            } else {
+              const elapsed = time - this.captchaState.bottomPanelStartTime;
+              if (elapsed >= this.captchaState.requiredTouchDuration) {
+                this.captchaState.bottomPanelCompleted = true;
+                this.updatePanelColor('bottomPanel', '#00FF00');
+              }
+            }
+          } else {
+            this.captchaState.bottomPanelTouching = false;
+            this.captchaState.bottomPanelStartTime = null;
+          }
+          
+          // Check if captcha is complete
+          if (this.captchaState.topPanelCompleted && this.captchaState.bottomPanelCompleted && !this.captchaState.captchaComplete) {
+            this.captchaState.captchaComplete = true;
+            this.message = 'CAPTCHA COMPLETE!';
+          }
+        },
+        updatePanelColor: function (panelId, color) {
+          const sceneEl = this.el.sceneEl;
+          if (!sceneEl) { return; }
+          const panel = sceneEl.querySelector('#' + panelId);
+          if (panel) {
+            panel.setAttribute('material', 'color', color);
+          }
+        },
+        getCaptchaProgress: function () {
+          const parts = [];
+          
+          if (this.captchaState.topPanelCompleted) {
+            parts.push('Top: ✓');
+          } else if (this.captchaState.topPanelTouching && this.captchaState.topPanelStartTime !== null) {
+            const progress = Math.min(100, Math.floor(((Date.now() - this.captchaState.topPanelStartTime) / this.captchaState.requiredTouchDuration) * 100));
+            parts.push('Top: ' + progress + '%');
+          } else {
+            parts.push('Top: -');
+          }
+          
+          if (this.captchaState.bottomPanelCompleted) {
+            parts.push('Bottom: ✓');
+          } else if (this.captchaState.bottomPanelTouching && this.captchaState.bottomPanelStartTime !== null) {
+            const progress = Math.min(100, Math.floor(((Date.now() - this.captchaState.bottomPanelStartTime) / this.captchaState.requiredTouchDuration) * 100));
+            parts.push('Bottom: ' + progress + '%');
+          } else {
+            parts.push('Bottom: -');
+          }
+          
+          return parts.join(' | ');
+        },
+        resolveController: function (id) {
+          const sceneEl = this.el.sceneEl;
+          if (!sceneEl) { return null; }
+          const cached = this.cache[id];
+          if (cached && cached.isConnected) { return cached; }
+          const el = sceneEl.querySelector('#' + id);
+          if (el) { this.cache[id] = el; }
+          return el;
+        },
+        clearUploadLoop: function () {
+          if (this.uploadInterval) {
+            clearInterval(this.uploadInterval);
+            this.uploadInterval = null;
+          }
+          if (this.boundUnloadHandler) {
+            window.removeEventListener('beforeunload', this.boundUnloadHandler);
+            this.boundUnloadHandler = null;
+          }
+        },
+        tick: function (time, delta) {
+          this.updateCamera();
+          this.setupControllerListeners();
+          if (!this.textEl) { return; }
+          const sceneEl = this.el.sceneEl;
+          if (!sceneEl) { return; }
+
+          const dt = (this.prevTime !== null && delta > 0) ? delta / 1000 : null;
+          const lines = [];
+
+          const leftHandEl = this.resolveController('leftHand');
+          const rightHandEl = this.resolveController('rightHand');
+          
+          // Update captcha state
+          if (rightHandEl) {
+            const rightHandPos = new THREE.Vector3();
+            rightHandEl.object3D.getWorldPosition(rightHandPos);
+            this.updateCaptchaState(rightHandPos, time);
+          }
+
+          const targets = [
+            { label: 'Headset', obj3D: this.cameraEl ? this.cameraEl.object3D : null, key: 'headset' },
+            { label: 'Left Ctrl', obj3D: leftHandEl ? leftHandEl.object3D : null, key: 'leftController' },
+            { label: 'Right Ctrl', obj3D: rightHandEl ? rightHandEl.object3D : null, key: 'rightController' }
+          ];
+
+          for (let i = 0; i < targets.length; i++) {
+            const target = targets[i];
+            if (!target.obj3D) {
+              lines.push(target.label + ': N/A');
+              continue;
+            }
+
+            const tracker = this.getTracker(target.key);
+            target.obj3D.getWorldPosition(tracker.currentPosition);
+            target.obj3D.getWorldQuaternion(tracker.currentRotation);
+
+            if (dt && tracker.hasPrev) {
+              tracker.velocity.copy(tracker.currentPosition).sub(tracker.prevPosition).divideScalar(dt);
+            } else {
+              tracker.velocity.set(0, 0, 0);
+            }
+
+            tracker.prevPosition.copy(tracker.currentPosition);
+            tracker.hasPrev = true;
+
+            if (this.isRecording) {
+              this.records.push({trackerKey: target.key, epoch: Date.now(), timestamp: time, position: {...tracker.currentPosition}, rotation: {...tracker.currentRotation}});
+            }
+
+            lines.push(
+              target.label + ' Pos (m): ' + this.formatVector(tracker.currentPosition) + '\n' +
+              target.label + ' Vel (m/s): ' + this.formatVector(tracker.velocity)
+            );
+          }
+
+          if (this.uploadSession && this.uploadSession.name) {
+            lines.push('Upload name: ' + this.uploadSession.name);
+          }
+
+          lines.push('Recording: ' + (this.isRecording ? 'ON' : 'OFF'));
+          lines.push('Stored samples: ' + this.recordCount);
+          lines.push('Captcha: ' + this.getCaptchaProgress());
+          lines.push('Message: ' + this.message);
+
+          this.prevTime = time;
+          const message = lines.join('\n');
+          if (message !== this.currentText) {
+            this.currentText = message;
+            this.textEl.setAttribute('value', message);
+          }
+        },
+        uploadPendingRecords: async function () {
+          const ourRecords = this.records;
+          this.records = [];
+          try {
+          await this.postRecords(ourRecords, this.uploadSession);
+          } catch (e) {
+          this.message = e.toString();
+          }
+          this.recordCount += ourRecords.length;
+        },
+        postRecords: function (entries, session) {
+          const payloadLines = entries.map((entry) => {
+            return JSON.stringify({
+              trackerKey: entry.trackerKey,
+              epoch: entry.epoch,
+              timestamp: entry.timestamp,
+              position: entry.position,
+              rotation: entry.rotation
+            });
+          });
+
+          if (payloadLines.length === 0) {
+            return;
+          }
+
+          const body = payloadLines.join('\n');
+          const uploadKey = session && session.key ? session.key : '';
+          if (!uploadKey) {
+            console.error('No upload key available for upload');
+            return;
+          }
+
+          const url = '/api/upload?upload_key=' + encodeURIComponent(uploadKey);
+
+          fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-ndjson'
+            },
+            body: body
+          })
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error('Unexpected response status ' + response.status);
+              }
+              return response.text().catch(() => '');
+            })
+            .catch((error) => {
+              console.error('Failed to upload tracker positions', error);
+            });
+        },
+      });
+    </script>
+  </head>
+  <body>
+    <a-scene xr-mode-ui="enabled: true; XRMode: xr;">
+      <a-entity id="showPosVel" position="0 1.2 -2" headset-pos-vel="target: #showPosVelText">
+        <a-plane width="1" height="0.3" material="color: #FFFCAB; shader: flat"></a-plane>
+        <a-text id="showPosVelText" value="Loading..." align="center" color="#333" width="2" position="0 0 0.02"></a-text>
+      </a-entity>
+      
+      <!-- Captcha panels: positioned at arm's length (~0.5m) in front of user -->
+      <a-box id="topPanel" position="0 1.7 -0.5" width="0.15" height="0.15" depth="0.05" material="color: #FF6B6B; shader: flat"></a-box>
+      <a-text value="Touch with Right Controller" position="0 1.7 -0.45" align="center" color="#FFF" width="0.8"></a-text>
+      
+      <a-box id="bottomPanel" position="0 1.0 -0.5" width="0.15" height="0.15" depth="0.05" material="color: #4ECDC4; shader: flat"></a-box>
+      <a-text value="Touch with Right Controller" position="0 1.0 -0.45" align="center" color="#FFF" width="0.8"></a-text>
+      
+      <a-entity id="leftHand" laser-controls="hand: left" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
+      <a-entity id="rightHand" laser-controls="hand: right" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
+    </a-scene>
+  </body>
+</html>
