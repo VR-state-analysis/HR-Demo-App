@@ -91,13 +91,13 @@
             Math.abs(controllerPos.z - panelPos.z) < threshold
           );
         },
-        updateCaptchaState: function (rightHandPos, time) {
+        updateCaptchaState: function (leftHandPos, rightHandPos, time) {
           const topPanelPos = { x: 0, y: 1.7, z: -0.5 };
           const bottomPanelPos = { x: 0, y: 1.0, z: -0.5 };
           const panelSize = { width: 0.15, height: 0.15 };
           
           const touchingTop = this.checkPanelCollision(rightHandPos, topPanelPos, panelSize);
-          const touchingBottom = this.checkPanelCollision(rightHandPos, bottomPanelPos, panelSize);
+          const touchingBottom = this.checkPanelCollision(leftHandPos, bottomPanelPos, panelSize);
           
           // Top panel logic
           if (touchingTop && !this.captchaState.topPanelCompleted) {
@@ -203,10 +203,12 @@
           const rightHandEl = this.resolveController('rightHand');
           
           // Update captcha state
-          if (rightHandEl) {
+          if (leftHandEl && rightHandEl) {
+            const leftHandPos = new THREE.Vector3();
             const rightHandPos = new THREE.Vector3();
+            leftHandEl.object3D.getWorldPosition(leftHandPos);
             rightHandEl.object3D.getWorldPosition(rightHandPos);
-            this.updateCaptchaState(rightHandPos, time);
+            this.updateCaptchaState(leftHandPos, rightHandPos, time);
           }
 
           const targets = [
@@ -327,7 +329,7 @@
       <a-text value="Touch with Right Controller" position="0 1.7 -0.45" align="center" color="#FFF" width="0.8"></a-text>
       
       <a-box id="bottomPanel" position="0 1.0 -0.5" width="0.15" height="0.15" depth="0.05" material="color: #4ECDC4; shader: flat"></a-box>
-      <a-text value="Touch with Right Controller" position="0 1.0 -0.45" align="center" color="#FFF" width="0.8"></a-text>
+      <a-text value="Touch with Left Controller" position="0 1.0 -0.45" align="center" color="#FFF" width="0.8"></a-text>
       
       <a-entity id="leftHand" laser-controls="hand: left" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
       <a-entity id="rightHand" laser-controls="hand: right" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
