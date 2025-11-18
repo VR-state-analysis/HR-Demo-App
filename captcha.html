@@ -20,6 +20,16 @@
           this.uploadInterval = setInterval(this.uploadPendingRecords.bind(this), 3000);
           this.isRecording = false;
           this.listenersAttached = false;
+          this.targetPositionsRecorded = false;
+          
+          // Randomize panel positions
+          const xRange = 0.4; // +/- 0.4m horizontally
+          const yRange = 0.5; // +/- 0.5m vertically
+          const topX = (Math.random() - 0.5) * 2 * xRange;
+          const topY = 1.5 + (Math.random() - 0.5) * 2 * yRange;
+          const bottomX = (Math.random() - 0.5) * 2 * xRange;
+          const bottomY = 1.2 + (Math.random() - 0.5) * 2 * yRange;
+          
           this.captchaState = {
             topPanelTouching: false,
             bottomPanelTouching: false,
@@ -28,8 +38,38 @@
             topPanelCompleted: false,
             bottomPanelCompleted: false,
             requiredTouchDuration: 2000, // 2 seconds
-            captchaComplete: false
+            captchaComplete: false,
+            topPanelPos: { x: topX, y: topY, z: -0.5 },
+            bottomPanelPos: { x: bottomX, y: bottomY, z: -0.5 }
           };
+          
+          // Apply randomized positions to panels
+          setTimeout(() => {
+            const sceneEl = this.el.sceneEl;
+            if (sceneEl) {
+              const topPanel = sceneEl.querySelector('#topPanel');
+              const bottomPanel = sceneEl.querySelector('#bottomPanel');
+              const topText = sceneEl.querySelector('#topText');
+              const bottomText = sceneEl.querySelector('#bottomText');
+              
+              if (topPanel) {
+                topPanel.setAttribute('position', `${topX} ${topY} -0.5`);
+                topPanel.setAttribute('visible', true);
+              }
+              if (bottomPanel) {
+                bottomPanel.setAttribute('position', `${bottomX} ${bottomY} -0.5`);
+                bottomPanel.setAttribute('visible', true);
+              }
+              if (topText) {
+                topText.setAttribute('position', `${topX} ${topY} -0.45`);
+                topText.setAttribute('visible', true);
+              }
+              if (bottomText) {
+                bottomText.setAttribute('position', `${bottomX} ${bottomY} -0.45`);
+                bottomText.setAttribute('visible', true);
+              }
+            }
+          }, 100);
         },
         setupControllerListeners: function () {
           if (this.listenersAttached) { return; }
@@ -92,8 +132,8 @@
           );
         },
         updateCaptchaState: function (leftHandPos, rightHandPos, time) {
-          const topPanelPos = { x: 0, y: 1.7, z: -0.5 };
-          const bottomPanelPos = { x: 0, y: 1.0, z: -0.5 };
+          const topPanelPos = this.captchaState.topPanelPos;
+          const bottomPanelPos = this.captchaState.bottomPanelPos;
           const panelSize = { width: 0.15, height: 0.15 };
           
           const touchingTop = this.checkPanelCollision(rightHandPos, topPanelPos, panelSize);
@@ -246,6 +286,25 @@
               target.label + ' Vel (m/s): ' + this.formatVector(tracker.velocity)
             );
           }
+          
+          // Record target positions once when recording starts
+          if (this.isRecording && !this.targetPositionsRecorded) {
+            this.records.push({
+              type: 'targetPositions',
+              topPanelPos: {...this.captchaState.topPanelPos},
+              bottomPanelPos: {...this.captchaState.bottomPanelPos},
+            });
+            this.targetPositionsRecorded = true;
+          }
+          
+          // Reset flag when recording stops
+          if (!this.isRecording && this.targetPositionsRecorded) {
+            this.targetPositionsRecorded = false;
+          }
+          
+          // Display target positions
+          lines.push('Top Target: ' + this.formatVector(this.captchaState.topPanelPos));
+          lines.push('Bottom Target: ' + this.formatVector(this.captchaState.bottomPanelPos));
 
           if (this.uploadSession && this.uploadSession.name) {
             lines.push('Upload name: ' + this.uploadSession.name);
@@ -325,11 +384,11 @@
       </a-entity>
       
       <!-- Captcha panels: positioned at arm's length (~0.5m) in front of user -->
-      <a-box id="topPanel" position="0 1.7 -0.5" width="0.15" height="0.15" depth="0.05" material="color: #FF6B6B; shader: flat"></a-box>
-      <a-text value="Touch with Right Controller" position="0 1.7 -0.45" align="center" color="#FFF" width="0.8"></a-text>
+      <a-box id="topPanel" position="0 1.7 -0.5" width="0.15" height="0.15" depth="0.05" material="color: #FF6B6B; shader: flat" visible="false"></a-box>
+      <a-text id="topText" value="Touch with Right Controller" position="0 1.7 -0.45" align="center" color="#FFF" width="0.8" visible="false"></a-text>
       
-      <a-box id="bottomPanel" position="0 1.0 -0.5" width="0.15" height="0.15" depth="0.05" material="color: #4ECDC4; shader: flat"></a-box>
-      <a-text value="Touch with Left Controller" position="0 1.0 -0.45" align="center" color="#FFF" width="0.8"></a-text>
+      <a-box id="bottomPanel" position="0 1.0 -0.5" width="0.15" height="0.15" depth="0.05" material="color: #4ECDC4; shader: flat" visible="false"></a-box>
+      <a-text id="bottomText" value="Touch with Left Controller" position="0 1.0 -0.45" align="center" color="#FFF" width="0.8" visible="false"></a-text>
       
       <a-entity id="leftHand" laser-controls="hand: left" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
       <a-entity id="rightHand" laser-controls="hand: right" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
