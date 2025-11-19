@@ -288,7 +288,7 @@
           }
           
           // Record target positions once when recording starts
-          if (this.isRecording) {
+          if (this.isRecording && !this.targetPositionsRecorded) {
             this.records.push({
               type: 'targetPositions',
               topPanelPos: {...this.captchaState.topPanelPos},
@@ -334,6 +334,9 @@
         },
         postRecords: function (entries, session) {
           const payloadLines = entries.map((entry) => {
+            if (entry.type === 'targetPositions') {
+              return entry;
+            }
             return JSON.stringify({
               trackerKey: entry.trackerKey,
               epoch: entry.epoch,
