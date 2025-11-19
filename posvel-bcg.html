@@ -1,0 +1,189 @@
+<html>
+  <head>
+    <title>Position Collection for BCG</title>
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    <script>
+      AFRAME.registerComponent('headset-pos-vel', {
+        schema: { target: { type: 'selector' } },
+        init: function () {
+          this.cameraEl = null;
+          this.textEl = null;
+          this.prevTime = null;
+          this.trackers = {};
+          this.cache = { leftHand: null, rightHand: null };
+          this.currentText = '';
+          this.records = [];
+          this.recordCount = 0;
+          this.message = '';
+          this.uploadSession = { key: '0ba7fd59fd0e896f29530f017d20db0a7812be0fd88d9213e75ffb609fac4adfc71861cbb1b2b717c24e23e81c045b71aae9646ec35189de633fdf970a33ba38', name: 'onyx aurora amber battery' };
+          this.boundUnloadHandler = null;
+          this.uploadInterval = setInterval(this.uploadPendingRecords.bind(this), 3000);
+        },
+        update: function () {
+          this.textEl = this.data.target || this.el.querySelector('a-text');
+        },
+        updateCamera: function () {
+          if (this.cameraEl) { return; }
+          const sceneEl = this.el.sceneEl;
+          if (sceneEl && sceneEl.camera && sceneEl.camera.el) {
+            this.cameraEl = sceneEl.camera.el;
+          }
+        },
+        getTracker: function (key) {
+          if (!this.trackers[key]) {
+            this.trackers[key] = {
+              prevPosition: new THREE.Vector3(),
+              currentPosition: new THREE.Vector3(),
+              velocity: new THREE.Vector3(),
+              lastSavedPosition: new THREE.Vector3(),
+              hasPrev: false,
+              hasSaved: false
+            };
+          }
+          return this.trackers[key];
+        },
+        formatVector: function (vec) {
+          return vec.x.toFixed(2) + ', ' + vec.y.toFixed(2) + ', ' + vec.z.toFixed(2);
+        },
+        resolveController: function (id) {
+          const sceneEl = this.el.sceneEl;
+          if (!sceneEl) { return null; }
+          const cached = this.cache[id];
+          if (cached && cached.isConnected) { return cached; }
+          const el = sceneEl.querySelector('#' + id);
+          if (el) { this.cache[id] = el; }
+          return el;
+        },
+        clearUploadLoop: function () {
+          if (this.uploadInterval) {
+            clearInterval(this.uploadInterval);
+            this.uploadInterval = null;
+          }
+          if (this.boundUnloadHandler) {
+            window.removeEventListener('beforeunload', this.boundUnloadHandler);
+            this.boundUnloadHandler = null;
+          }
+        },
+        tick: function (time, delta) {
+          this.updateCamera();
+          if (!this.textEl) { return; }
+          const sceneEl = this.el.sceneEl;
+          if (!sceneEl) { return; }
+
+          const dt = (this.prevTime !== null && delta > 0) ? delta / 1000 : null;
+          const lines = [];
+
+          const leftHandEl = this.resolveController('leftHand');
+          const rightHandEl = this.resolveController('rightHand');
+
+          const targets = [
+            { label: 'Headset', obj3D: this.cameraEl ? this.cameraEl.object3D : null, key: 'headset' },
+            { label: 'Left Ctrl', obj3D: leftHandEl ? leftHandEl.object3D : null, key: 'leftController' },
+            { label: 'Right Ctrl', obj3D: rightHandEl ? rightHandEl.object3D : null, key: 'rightController' }
+          ];
+
+          for (let i = 0; i < targets.length; i++) {
+            const target = targets[i];
+            if (!target.obj3D) {
+              lines.push(target.label + ': N/A');
+              continue;
+            }
+
+            const tracker = this.getTracker(target.key);
+            target.obj3D.getWorldPosition(tracker.currentPosition);
+
+            if (dt && tracker.hasPrev) {
+              tracker.velocity.copy(tracker.currentPosition).sub(tracker.prevPosition).divideScalar(dt);
+            } else {
+              tracker.velocity.set(0, 0, 0);
+            }
+
+            tracker.prevPosition.copy(tracker.currentPosition);
+            tracker.hasPrev = true;
+
+            this.records.push({trackerKey: target.key, epoch: Date.now(), timestamp: time, position: {...tracker.currentPosition}});
+
+            lines.push(
+              target.label + ' Pos (m): ' + this.formatVector(tracker.currentPosition) + '\n' +
+              target.label + ' Vel (m/s): ' + this.formatVector(tracker.velocity)
+            );
+          }
+
+          if (this.uploadSession && this.uploadSession.name) {
+            lines.push('Upload name: ' + this.uploadSession.name);
+          }
+
+          lines.push('Stored samples: ' + this.recordCount);
+          lines.push('Message: ' + this.message);
+
+          this.prevTime = time;
+          const message = lines.join('\n');
+          if (message !== this.currentText) {
+            this.currentText = message;
+            this.textEl.setAttribute('value', message);
+          }
+        },
+        uploadPendingRecords: async function () {
+          const ourRecords = this.records;
+          this.records = [];
+          try {
+          await this.postRecords(ourRecords, this.uploadSession);
+          } catch (e) {
+          this.message = e.toString();
+          }
+          this.recordCount += ourRecords.length;
+        },
+        postRecords: function (entries, session) {
+          const payloadLines = entries.map((entry) => {
+            return JSON.stringify({
+              trackerKey: entry.trackerKey,
+              epoch: entry.epoch,
+              timestamp: entry.timestamp,
+              position: entry.position
+            });
+          });
+
+          if (payloadLines.length === 0) {
+            return;
+          }
+
+          const body = payloadLines.join('\n');
+          const uploadKey = session && session.key ? session.key : '';
+          if (!uploadKey) {
+            console.error('No upload key available for upload');
+            return;
+          }
+
+          const url = '/api/upload?upload_key=' + encodeURIComponent(uploadKey);
+
+          fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-ndjson'
+            },
+            body: body
+          })
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error('Unexpected response status ' + response.status);
+              }
+              return response.text().catch(() => '');
+            })
+            .catch((error) => {
+              console.error('Failed to upload tracker positions', error);
+            });
+        },
+      });
+    </script>
+  </head>
+  <body>
+    <a-scene xr-mode-ui="enabled: true; XRMode: xr;">
+      <a-entity id="showPosVel" position="0 1.2 -2" headset-pos-vel="target: #showPosVelText">
+        <a-plane width="1" height="0.3" material="color: #FFFCAB; shader: flat"></a-plane>
+        <a-text id="showPosVelText" value="Loading..." align="center" color="#333" width="2" position="0 0 0.02"></a-text>
+      </a-entity>
+      <a-entity id="leftHand" laser-controls="hand: left" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
+      <a-entity id="rightHand" laser-controls="hand: right" curosr="rayOrigin: entity" raycaster="objects: .clickable; far: 10"></a-entity>
+    </a-scene>
+  </body>
+</html>
