@@ -288,7 +288,7 @@
           }
           
           // Record target positions once when recording starts
-          if (this.isRecording && !this.targetPositionsRecorded) {
+          if (this.isRecording) {
             this.records.push({
               type: 'targetPositions',
               topPanelPos: {...this.captchaState.topPanelPos},
