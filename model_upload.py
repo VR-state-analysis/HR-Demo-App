@@ -216,6 +216,7 @@ def main():
     parser.add_argument(
         'input_upload_key',
         default='0ba7fd59fd0e896f29530f017d20db0a7812be0fd88d9213e75ffb609fac4adfc71861cbb1b2b717c24e23e81c045b71aae9646ec35189de633fdf970a33ba38',
+        nargs='?',
         help='Upload key for the input data to download'
     )
     parser.add_argument(
@@ -238,9 +239,9 @@ def main():
     args = parser.parse_args()
     
     # Create output upload key once at start if uploading
-    output_key = None
+    output_key = args.output_upload_key
     output_name = None
-    if not args.no_upload and args.output_key is None:
+    if not args.no_upload and args.output_upload_key is None:
         try:
             output_key, output_name = create_upload_key()
             print(f"Created output upload key: {output_name} ({output_key})")
