@@ -7,13 +7,49 @@
         background-color: #eee;
         font-family: system-ui sans-serif;
       }
+      figure {
+        padding: 5px;
+        max-width: 100%;
+        margin: auto;
+      }
+      img {
+        max-width: 100%;
+      }
+      
+      figcaption {
+        font: sans-serif;
+        padding: 3px;
+      }
     </style>
   </head>
   <body>
     <h1>XR CAPTCHA Demo Animations</h1>
-    <img src="captcha_noise_comparison.png" />
-    <img src="captcha_noise_comparison_captcha_noisy.gif" />
-    <img src="captcha_noise_comparison_original.gif" />
-    <img src="captcha_noise_comparison_replay_noisy.gif" />
+    <figure>
+      <img src="captcha_noise_comparison.png" alt="three graphs, explained in caption" />
+      <figcaption>
+        Three 3D motion graphs.
+        The left is the original motion data of a user completing the two-panel CAPTCHA.
+        The middle is the motion data with the maximal amount of noise while still successfilly completing the CAPTCHA.
+        The right is the motion data with the amount of noise where our replay algorithm does not detect it as the original.
+      </figcaption>
+    </figure>
+    <figure>
+      <img src="captcha_noise_comparison_original.gif" alt="animated original CAPTCHA completion" />
+      <figcaption>
+        Animated visualization of the original motion data of a user completing the two-panel CAPTCHA.
+      </figcaption>
+    </figure>
+    <figure>
+      <img src="captcha_noise_comparison_captcha_noisy.gif" alt="animated noisy CAPTCHA completion" />
+      <figcaption>
+        Animated visualization of completing the CAPTCHA with maximal noise applied to the motion data.
+      </figcaption>
+    </figure>
+    <figure>
+      <img src="captcha_noise_comparison_replay_noisy.gif" alt="animated replay with noise" />
+      <figcaption>
+        Animated visualization of the replay with noise applied, where the replay algorithm no longer detects it as the original motion.
+      </figcaption>
+    </figure>
   </body>
 </html>
