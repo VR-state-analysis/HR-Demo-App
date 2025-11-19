@@ -334,7 +334,7 @@
         },
         postRecords: function (entries, session) {
           const payloadLines = entries.map((entry) => {
-            if (entry.type === 'targetPositions') {
+            if ('type' in entry && entry.type === 'targetPositions') {
               return entry;
             }
             return JSON.stringify({
