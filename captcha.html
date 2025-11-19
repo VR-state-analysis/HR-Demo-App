@@ -335,7 +335,7 @@
         postRecords: function (entries, session) {
           const payloadLines = entries.map((entry) => {
             if ('type' in entry && entry.type === 'targetPositions') {
-              return entry;
+              return JSON.stringify(entry);
             }
             return JSON.stringify({
               trackerKey: entry.trackerKey,
