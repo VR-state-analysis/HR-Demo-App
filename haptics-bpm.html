@@ -72,6 +72,8 @@
             const a0 = actuators[0];
             if (a0 && typeof a0.pulse === 'function') {
               pulses.push(a0.pulse(intensity, duration).catch(() => {}));
+              pulses.push(new Promise(resolve => setTimeout(resolve, 30)));
+              pulses.push(a0.pulse(intensity*0.8, duration).catch(() => {}));
               continue;
             }
       
@@ -83,6 +85,14 @@
                   duration,
                   strongMagnitude: intensity,
                   weakMagnitude: intensity
+                }).catch(() => {})
+              );
+              pulses.push(new Promise(resolve => setTimeout(resolve, 30)));
+              pulses.push(
+                vib.playEffect('dual-rumble', {
+                  duration,
+                  strongMagnitude: intensity*0.8,
+                  weakMagnitude: intensit*0.8y
                 }).catch(() => {})
               );
             }
